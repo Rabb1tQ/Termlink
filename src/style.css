@@ -1,0 +1,648 @@
+/* 全局样式 */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  overflow: hidden;
+}
+
+/* 基础主题变量 */
+:root {
+  --bg-color: #1a1a1a;
+  --text-color: #ffffff;
+  --border-color: #333333;
+  --menu-bg: #2d2d2d;
+  --tabs-bg: #2d2d2d;
+  --panel-bg: #2d2d2d;
+  --panel-header-bg: #3a3a3a;
+  --terminal-bg: #0b0e14;
+  --status-bg: #2d2d2d;
+  --muted-color: #888888;
+  --hover-bg: #404040;
+  --toolbar-bg: #3a3a3a;
+  --primary-color: #1890ff;
+  --success-color: #52c41a;
+  --warning-color: #faad14;
+  --error-color: #ff4d4f;
+}
+
+/* 深色主题 */
+body[data-theme="dark"] {
+  --bg-color: #1a1a1a;
+  --text-color: #ffffff;
+  --border-color: #333333;
+  --menu-bg: #2d2d2d;
+  --tabs-bg: #2d2d2d;
+  --panel-bg: #2d2d2d;
+  --panel-header-bg: #3a3a3a;
+  --terminal-bg: #0b0e14;
+  --status-bg: #2d2d2d;
+  --muted-color: #888888;
+  --hover-bg: #404040;
+  --toolbar-bg: #3a3a3a;
+  --primary-color: #1890ff;
+  --success-color: #52c41a;
+  --warning-color: #faad14;
+  --error-color: #ff4d4f;
+}
+
+/* 浅色主题 */
+body[data-theme="light"] {
+  --bg-color: #ffffff;
+  --text-color: #000000;
+  --border-color: #d9d9d9;
+  --menu-bg: #f5f5f5;
+  --tabs-bg: #f5f5f5;
+  --panel-bg: #fafafa;
+  --panel-header-bg: #f0f0f0;
+  --terminal-bg: #ffffff;
+  --status-bg: #f5f5f5;
+  --muted-color: #666666;
+  --hover-bg: #e6f7ff;
+  --toolbar-bg: #f0f0f0;
+  --primary-color: #1890ff;
+  --success-color: #52c41a;
+  --warning-color: #faad14;
+  --error-color: #ff4d4f;
+}
+
+/* 应用主题到 body */
+body {
+  background: var(--bg-color);
+  color: var(--text-color);
+  transition: all 0.3s ease;
+}
+
+/* Ant Design 主题覆盖 */
+.ant-menu {
+  background: var(--menu-bg) !important;
+  border-bottom-color: var(--border-color) !important;
+}
+
+.ant-menu-dark {
+  background: var(--menu-bg) !important;
+}
+
+.ant-menu-dark .ant-menu-submenu-title {
+  color: var(--text-color) !important;
+}
+
+.ant-menu-dark .ant-menu-item {
+  color: var(--text-color) !important;
+}
+
+.ant-menu-dark .ant-menu-item:hover {
+  background: var(--hover-bg) !important;
+}
+
+.ant-menu-dark .ant-menu-submenu-popup {
+  background: var(--menu-bg) !important;
+}
+
+.ant-tabs {
+  background: var(--tabs-bg) !important;
+  color: var(--text-color) !important;
+}
+
+.ant-tabs-nav {
+  margin: 0 !important;
+  background: var(--tabs-bg) !important;
+}
+
+.ant-tabs-tab {
+  background: var(--tabs-bg) !important;
+  border-color: var(--border-color) !important;
+  color: var(--text-color) !important;
+}
+
+.ant-tabs-tab-active {
+  background: var(--bg-color) !important;
+  border-color: var(--primary-color) !important;
+}
+
+.ant-tabs-tab-active .ant-tabs-tab-btn {
+  color: var(--primary-color) !important;
+}
+
+.ant-tabs-tab:hover {
+  background: var(--hover-bg) !important;
+}
+
+.ant-tabs-content-holder {
+  background: var(--bg-color) !important;
+}
+
+.ant-modal-content {
+  background: var(--bg-color) !important;
+  color: var(--text-color) !important;
+}
+
+.ant-modal-header {
+  background: var(--bg-color) !important;
+  border-bottom-color: var(--border-color) !important;
+}
+
+.ant-modal-title {
+  color: var(--text-color) !important;
+}
+
+.ant-input {
+  background: var(--bg-color) !important;
+  border-color: var(--border-color) !important;
+  color: var(--text-color) !important;
+}
+
+.ant-input:focus {
+  border-color: var(--primary-color) !important;
+}
+
+.ant-select-selector {
+  background: var(--bg-color) !important;
+  border-color: var(--border-color) !important;
+}
+
+.ant-select-selection-item {
+  color: var(--text-color) !important;
+}
+
+.ant-list-item {
+  border-color: var(--border-color) !important;
+}
+
+.ant-list-item-meta-title {
+  color: var(--text-color) !important;
+}
+
+.ant-list-item-meta-description {
+  color: var(--muted-color) !important;
+}
+
+.ant-button {
+  border-color: var(--border-color) !important;
+}
+
+.ant-button-primary {
+  background: var(--primary-color) !important;
+  border-color: var(--primary-color) !important;
+}
+
+.ant-button-primary:hover {
+  background: var(--primary-color) !important;
+  opacity: 0.8;
+}
+
+.ant-button-primary.ant-btn-ghost {
+  color: var(--primary-color) !important;
+  border-color: var(--primary-color) !important;
+}
+
+/* 深色模式下的额外样式覆盖 */
+body[data-theme="dark"] .ant-select-dropdown {
+  background: var(--panel-bg) !important;
+  border-color: var(--border-color) !important;
+}
+
+body[data-theme="dark"] .ant-select-item {
+  color: var(--text-color) !important;
+}
+
+body[data-theme="dark"] .ant-select-item:hover {
+  background: var(--hover-bg) !important;
+}
+
+body[data-theme="dark"] .ant-select-item-option-selected {
+  background: var(--primary-color) !important;
+  color: white !important;
+}
+
+body[data-theme="dark"] .ant-dropdown {
+  background: var(--panel-bg) !important;
+  border-color: var(--border-color) !important;
+}
+
+body[data-theme="dark"] .ant-dropdown-menu {
+  background: var(--panel-bg) !important;
+  border-color: var(--border-color) !important;
+}
+
+body[data-theme="dark"] .ant-dropdown-menu-item {
+  color: var(--text-color) !important;
+}
+
+body[data-theme="dark"] .ant-dropdown-menu-item:hover {
+  background: var(--hover-bg) !important;
+}
+
+body[data-theme="dark"] .ant-tooltip-inner {
+  background: var(--panel-bg) !important;
+  color: var(--text-color) !important;
+}
+
+body[data-theme="dark"] .ant-tooltip-arrow::before {
+  background: var(--panel-bg) !important;
+}
+
+body[data-theme="dark"] .ant-popover-inner {
+  background: var(--panel-bg) !important;
+  border-color: var(--border-color) !important;
+}
+
+body[data-theme="dark"] .ant-popover-inner-content {
+  color: var(--text-color) !important;
+}
+
+body[data-theme="dark"] .ant-popover-arrow::before {
+  background: var(--panel-bg) !important;
+}
+
+body[data-theme="dark"] .ant-message-notice-content {
+  background: var(--panel-bg) !important;
+  color: var(--text-color) !important;
+  border-color: var(--border-color) !important;
+}
+
+body[data-theme="dark"] .ant-notification-notice {
+  background: var(--panel-bg) !important;
+  color: var(--text-color) !important;
+  border-color: var(--border-color) !important;
+}
+
+body[data-theme="dark"] .ant-spin-dot-item {
+  background-color: var(--primary-color) !important;
+}
+
+body[data-theme="dark"] .ant-progress-text {
+  color: var(--text-color) !important;
+}
+
+body[data-theme="dark"] .ant-tag {
+  background: var(--hover-bg) !important;
+  color: var(--text-color) !important;
+  border-color: var(--border-color) !important;
+}
+
+body[data-theme="dark"] .ant-tag-blue {
+  background: var(--primary-color) !important;
+  color: white !important;
+}
+
+body[data-theme="dark"] .ant-empty-description {
+  color: var(--muted-color) !important;
+}
+
+body[data-theme="dark"] .ant-breadcrumb {
+  color: var(--text-color) !important;
+}
+
+body[data-theme="dark"] .ant-breadcrumb-link {
+  color: var(--primary-color) !important;
+}
+
+body[data-theme="dark"] .ant-breadcrumb-separator {
+  color: var(--muted-color) !important;
+}
+
+/* 搜索框样式 */
+body[data-theme="dark"] .ant-input-search {
+  background: var(--panel-bg) !important;
+  border-color: var(--border-color) !important;
+}
+
+body[data-theme="dark"] .ant-input-search .ant-input {
+  background: var(--panel-bg) !important;
+  border-color: var(--border-color) !important;
+  color: var(--text-color) !important;
+}
+
+body[data-theme="dark"] .ant-input-search .ant-input::placeholder {
+  color: var(--muted-color) !important;
+}
+
+body[data-theme="dark"] .ant-input-search .ant-input-search-button {
+  background: var(--panel-bg) !important;
+  border-color: var(--border-color) !important;
+  color: var(--text-color) !important;
+}
+
+body[data-theme="dark"] .ant-input-search .ant-input-search-button:hover {
+  background: var(--hover-bg) !important;
+  border-color: var(--primary-color) !important;
+}
+
+/* 修复搜索框组合器的白色背景 */
+body[data-theme="dark"] .ant-input-group {
+  background: transparent !important;
+}
+
+body[data-theme="dark"] .ant-input-group .ant-input {
+  background: var(--panel-bg) !important;
+  border-color: var(--border-color) !important;
+  color: var(--text-color) !important;
+}
+
+body[data-theme="dark"] .ant-input-group .ant-input:focus {
+  border-color: var(--primary-color) !important;
+  box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.2) !important;
+}
+
+/* 修复搜索框附近的span和文本颜色 */
+body[data-theme="dark"] .ant-input-search .ant-input-search-button .anticon {
+  color: var(--text-color) !important;
+}
+
+body[data-theme="dark"] .ant-input-search .ant-input-search-button span {
+  color: var(--text-color) !important;
+}
+
+body[data-theme="dark"] .ant-input-group-addon {
+  background: var(--panel-bg) !important;
+  border-color: var(--border-color) !important;
+  color: var(--text-color) !important;
+}
+
+/* 修复搜索框清除图标颜色 */
+body[data-theme="dark"] .ant-input-affix-wrapper {
+  background: var(--panel-bg) !important;
+  border-color: var(--border-color) !important;
+}
+
+body[data-theme="dark"] .ant-input-affix-wrapper .ant-input {
+  background: var(--panel-bg) !important;
+  border-color: var(--border-color) !important;
+  color: var(--text-color) !important;
+}
+
+body[data-theme="dark"] .ant-input-affix-wrapper .ant-input::placeholder {
+  color: var(--muted-color) !important;
+}
+
+body[data-theme="dark"] .ant-input-suffix .anticon {
+  color: var(--muted-color) !important;
+}
+
+body[data-theme="dark"] .ant-input-clear-icon .anticon {
+  color: var(--muted-color) !important;
+}
+
+body[data-theme="dark"] .ant-input-clear-icon:hover .anticon {
+  color: var(--text-color) !important;
+}
+
+/* 修复文件管理器按钮图标颜色 */
+body[data-theme="dark"] .ant-btn .anticon {
+  color: var(--text-color) !important;
+}
+
+body[data-theme="dark"] .ant-btn:hover .anticon {
+  color: var(--primary-color) !important;
+}
+
+body[data-theme="dark"] .ant-btn:disabled .anticon {
+  color: var(--muted-color) !important;
+}
+
+body[data-theme="dark"] .ant-btn-group .ant-btn .anticon {
+  color: var(--text-color) !important;
+}
+
+body[data-theme="dark"] .ant-btn-group .ant-btn:hover .anticon {
+  color: var(--primary-color) !important;
+}
+
+body[data-theme="dark"] .ant-btn-group .ant-btn:disabled .anticon {
+  color: var(--muted-color) !important;
+}
+
+/* 确保按钮背景和边框正确 */
+body[data-theme="dark"] .ant-btn {
+  background: var(--panel-bg) !important;
+  border-color: var(--border-color) !important;
+  color: var(--text-color) !important;
+}
+
+body[data-theme="dark"] .ant-btn:hover {
+  background: var(--hover-bg) !important;
+  border-color: var(--primary-color) !important;
+  color: var(--text-color) !important;
+}
+
+body[data-theme="dark"] .ant-btn:disabled {
+  background: var(--panel-bg) !important;
+  border-color: var(--border-color) !important;
+  color: var(--muted-color) !important;
+}
+
+/* 滚动条样式 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--panel-bg);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted-color);
+}
+
+/* 终端容器样式 */
+.terminal-container {
+  background: var(--terminal-bg);
+  min-height: 200px;
+}
+
+/* 确保 xterm 可见 */
+.xterm {
+  background: var(--terminal-bg) !important;
+  color: var(--text-color) !important;
+}
+
+.xterm-viewport {
+  background: transparent !important;
+}
+
+/* 深色模式下的xterm样式 */
+body[data-theme="dark"] .xterm {
+  background: var(--terminal-bg) !important;
+  color: var(--text-color) !important;
+}
+
+body[data-theme="dark"] .xterm .xterm-screen {
+  background: var(--terminal-bg) !important;
+  color: var(--text-color) !important;
+}
+
+body[data-theme="dark"] .xterm .xterm-rows {
+  background: var(--terminal-bg) !important;
+  color: var(--text-color) !important;
+}
+
+body[data-theme="dark"] .xterm .xterm-cursor-layer {
+  background: var(--terminal-bg) !important;
+}
+
+body[data-theme="dark"] .xterm .xterm-selection-layer {
+  background: var(--terminal-bg) !important;
+}
+
+body[data-theme="light"] .xterm .xterm-selection-layer {
+  background: var(--terminal-bg) !important;
+}
+
+/* 修复Terminal文本选择样式 */
+/* 深色模式：深蓝色背景 + 白色文字 */
+body[data-theme="dark"] .xterm .xterm-selection {
+  background: #264f78 !important;
+  color: #ffffff !important;
+}
+
+body[data-theme="dark"] .xterm .xterm-selection-layer {
+  background: #264f78 !important;
+  color: #ffffff !important;
+}
+
+/* 浅色模式：深蓝色背景 + 白色文字 */
+body[data-theme="light"] .xterm .xterm-selection {
+  background: #0078d4 !important;
+  color: #ffffff !important;
+}
+
+body[data-theme="light"] .xterm .xterm-selection-layer {
+  background: #0078d4 !important;
+  color: #ffffff !important;
+}
+
+/* 全局文本选择样式 */
+body[data-theme="dark"] ::selection {
+  background: #264f78 !important;
+  color: #ffffff !important;
+}
+
+body[data-theme="light"] ::selection {
+  background: #0078d4 !important;
+  color: #ffffff !important;
+}
+
+/* xterm特定的选择样式 */
+body[data-theme="dark"] .xterm ::selection {
+  background: #264f78 !important;
+  color: #ffffff !important;
+}
+
+body[data-theme="light"] .xterm ::selection {
+  background: #0078d4 !important;
+  color: #ffffff !important;
+}
+
+/* 强制覆盖xterm的选择样式 */
+body[data-theme="dark"] .xterm .xterm-rows .xterm-row .xterm-selection {
+  background: #264f78 !important;
+  color: #ffffff !important;
+}
+
+body[data-theme="light"] .xterm .xterm-rows .xterm-row .xterm-selection {
+  background: #0078d4 !important;
+  color: #ffffff !important;
+}
+
+/* 额外的选择样式覆盖 */
+body[data-theme="dark"] .xterm .xterm-selection-layer .xterm-selection {
+  background: #264f78 !important;
+  color: #ffffff !important;
+}
+
+body[data-theme="light"] .xterm .xterm-selection-layer .xterm-selection {
+  background: #0078d4 !important;
+  color: #ffffff !important;
+}
+
+/* 覆盖所有可能的选择元素 */
+body[data-theme="dark"] .xterm *[class*="selection"] {
+  background: #264f78 !important;
+  color: #ffffff !important;
+}
+
+body[data-theme="light"] .xterm *[class*="selection"] {
+  background: #0078d4 !important;
+  color: #ffffff !important;
+}
+
+/* 强制设置Terminal文字颜色 - 排除选择状态 */
+body[data-theme="light"] .xterm .xterm-screen {
+  color: #000000 !important;
+}
+
+body[data-theme="light"] .xterm .xterm-rows {
+  color: #000000 !important;
+}
+
+body[data-theme="light"] .xterm .xterm-rows .xterm-row {
+  color: #000000 !important;
+}
+
+body[data-theme="light"] .xterm .xterm-rows .xterm-row span:not(.xterm-selection) {
+  color: #000000 !important;
+}
+
+body[data-theme="dark"] .xterm .xterm-screen {
+  color: #ffffff !important;
+}
+
+body[data-theme="dark"] .xterm .xterm-rows {
+  color: #ffffff !important;
+}
+
+body[data-theme="dark"] .xterm .xterm-rows .xterm-row {
+  color: #ffffff !important;
+}
+
+body[data-theme="dark"] .xterm .xterm-rows .xterm-row span:not(.xterm-selection) {
+  color: #ffffff !important;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+  .left-panel {
+    width: 200px !important;
+  }
+  
+  .toolbar {
+    display: none !important;
+  }
+  
+  .status-bar {
+    font-size: 10px !important;
+    padding: 2px 8px !important;
+  }
+}
+
+/* 动画效果 */
+.fade-enter-active, .fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.fade-enter-from, .fade-leave-to {
+  opacity: 0;
+}
+
+.slide-enter-active, .slide-leave-active {
+  transition: transform 0.3s ease;
+}
+
+.slide-enter-from {
+  transform: translateX(-100%);
+}
+
+.slide-leave-to {
+  transform: translateX(100%);
+}
