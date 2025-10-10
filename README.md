@@ -1,6 +1,6 @@
 # Termlink - MobaXterm 风格的终端工具
 
-一个基于 Tauri + Vue 3 的现代化终端工具，提供类似 MobaXterm 的功能和用户体验。
+一个基于 Tauri + Vue 3 的现代化终端工具。
 
 ## ✨ 主要功能
 
