@@ -27,10 +27,14 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install frontend dependencies
-        run: npm install
+        run: |
+          npm install
+          npm install @tauri-apps/cli
 
       - name: Build App (Frontend + Tauri)
-        run: npm run tauri:build -- --verbose
+        run: |
+          npm run build
+          npm run tauri build -- --verbose
 
       - name: List build artifacts
         shell: pwsh
