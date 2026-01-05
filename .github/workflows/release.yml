@@ -1,0 +1,83 @@
+name: Release
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '发布版本'
+        required: true
+        default: '0.1.0'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: 'npm'
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install frontend dependencies
+        run: |
+          npm install
+          npm install @tauri-apps/cli
+
+      - name: Build App (Frontend + Tauri)
+        run: |
+          npm run build
+          npm run tauri build -- --verbose
+
+      - name: List build artifacts
+        shell: pwsh
+        run: |
+          Write-Host "Checking build artifacts..."
+          Get-ChildItem -Path "src-tauri/target/release/bundle" -Recurse
+          
+      - name: Package release files
+        shell: pwsh
+        run: |
+          $msiFile = Get-ChildItem -Path "src-tauri/target/release/bundle/msi" -Filter "*.msi" | Select-Object -First 1
+          $setupFile = Get-ChildItem -Path "src-tauri/target/release/bundle/nsis" -Filter "*-setup.exe" | Select-Object -First 1
+          
+          if ($msiFile) {
+            Copy-Item $msiFile.FullName -Destination "./termlink-windows.msi"
+          } else {
+            Write-Error "MSI file not found!"
+          }
+          
+          if ($setupFile) {
+            Copy-Item $setupFile.FullName -Destination "./termlink-windows-setup.exe"
+          } else {
+            Write-Error "Setup EXE not found!"
+          }
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          tag_name: v${{ github.event.inputs.version }}
+          name: Termlink v${{ github.event.inputs.version }}
+          body: |
+            🚀 **Termlink Release v${{ github.event.inputs.version }}**
+            
+            ✅ Windows 版本发布
+            🖥️ SSH 终端和 SFTP 管理器
+            
+            ### 下载说明
+            - `termlink-windows.msi`: Windows MSI 安装包
+            - `termlink-windows-setup.exe`: Windows EXE 安装包
+          draft: false
+          prerelease: false
+          files: |
+            ./termlink-windows.msi
+            ./termlink-windows-setup.exe
