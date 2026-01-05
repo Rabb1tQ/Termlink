@@ -18,6 +18,7 @@
     "@xterm/xterm": "^5.5.0",
     "ant-design-vue": "^4.2.6",
     "less": "^4.4.1",
+    "monaco-editor": "^0.52.2",
     "vue": "^3.5.18"
   },
   "devDependencies": {

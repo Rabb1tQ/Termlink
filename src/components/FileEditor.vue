@@ -8,51 +8,51 @@
       </div>
       <div class="editor-actions">
         <a-button 
-          v-if="!isEditing" 
+          v-if="hasUnsavedChanges" 
           type="primary" 
           size="small" 
-          @click="startEditing"
-          :loading="loading"
+          @click="saveFile"
+          :loading="saving"
         >
-          编辑
+          保存
         </a-button>
-        <a-button-group v-else size="small">
-          <a-button @click="saveFile" :loading="saving" type="primary">
-            保存
-          </a-button>
-          <a-button @click="cancelEditing">
-            取消
-          </a-button>
-        </a-button-group>
-        <a-button size="small" @click="downloadFile" :loading="downloading">
+        <a-button 
+          v-if="hasUnsavedChanges" 
+          size="small" 
+          @click="discardChanges"
+        >
+          撤销更改
+        </a-button>
+        <a-button 
+          size="small" 
+          @click="downloadFile" 
+          :loading="downloading"
+        >
           下载
         </a-button>
+        <a-switch
+          v-model:checked="readOnly"
+          size="small"
+          checked-children="只读"
+          un-checked-children="编辑"
+          style="margin-left: 8px;"
+        />
       </div>
     </div>
     
-    <div class="editor-content">
-      <a-spin :spinning="loading" tip="加载文件内容...">
-        <div v-if="!isEditing" class="preview-mode">
-          <pre class="file-content">{{ fileContent }}</pre>
-        </div>
-        <div v-else class="edit-mode">
-          <a-textarea
-            v-model:value="editContent"
-            :rows="25"
-            :auto-size="{ minRows: 25, maxRows: 40 }"
-            placeholder="文件内容..."
-            class="editor-textarea"
-          />
-        </div>
+    <div class="editor-content" ref="editorContainer">
+      <a-spin :spinning="loading" tip="加载文件内容..." size="large">
+        <div v-show="!loading" ref="monacoEditor" class="monaco-container"></div>
       </a-spin>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { message } from 'ant-design-vue'
 import { invoke } from '@tauri-apps/api/core'
+import * as monaco from 'monaco-editor'
 
 const props = defineProps({
   fileInfo: {
@@ -66,16 +66,107 @@ const props = defineProps({
   connectionId: {
     type: String,
     default: null
+  },
+  theme: {
+    type: String,
+    default: 'light'
   }
 })
 
+const emit = defineEmits(['startDownload'])
+
 // 状态管理
+const monacoEditor = ref(null)
+const editorContainer = ref(null)
+let editor = null
 const fileContent = ref('')
-const editContent = ref('')
-const isEditing = ref(false)
+const originalContent = ref('')
+const readOnly = ref(false)
+const hasUnsavedChanges = ref(false)
 const loading = ref(false)
 const saving = ref(false)
 const downloading = ref(false)
+
+// 根据文件扩展名获取语言
+function getLanguageFromFilename(filename) {
+  const ext = filename.split('.').pop()?.toLowerCase()
+  const languageMap = {
+    'js': 'javascript',
+    'jsx': 'javascript',
+    'ts': 'typescript',
+    'tsx': 'typescript',
+    'json': 'json',
+    'html': 'html',
+    'htm': 'html',
+    'css': 'css',
+    'scss': 'scss',
+    'less': 'less',
+    'md': 'markdown',
+    'py': 'python',
+    'java': 'java',
+    'c': 'c',
+    'cpp': 'cpp',
+    'h': 'c',
+    'hpp': 'cpp',
+    'cs': 'csharp',
+    'go': 'go',
+    'rs': 'rust',
+    'php': 'php',
+    'rb': 'ruby',
+    'sh': 'shell',
+    'bash': 'shell',
+    'bat': 'bat',
+    'ps1': 'powershell',
+    'sql': 'sql',
+    'xml': 'xml',
+    'yaml': 'yaml',
+    'yml': 'yaml',
+    'toml': 'toml',
+    'ini': 'ini',
+    'conf': 'plaintext',
+    'log': 'plaintext',
+    'txt': 'plaintext',
+    'vue': 'html'
+  }
+  return languageMap[ext] || 'plaintext'
+}
+
+// 初始化编辑器
+function initMonacoEditor() {
+  if (!monacoEditor.value || editor) return
+  
+  const language = getLanguageFromFilename(props.fileInfo.name)
+  
+  editor = monaco.editor.create(monacoEditor.value, {
+    value: fileContent.value,
+    language: language,
+    theme: props.theme === 'dark' ? 'vs-dark' : 'vs',
+    readOnly: readOnly.value,
+    automaticLayout: true,
+    fontSize: 14,
+    lineNumbers: 'on',
+    minimap: {
+      enabled: true
+    },
+    scrollBeyondLastLine: false,
+    wordWrap: 'on',
+    tabSize: 2,
+    insertSpaces: true,
+    renderWhitespace: 'selection',
+    scrollbar: {
+      vertical: 'visible',
+      horizontal: 'visible',
+      verticalScrollbarSize: 12,
+      horizontalScrollbarSize: 12
+    }
+  })
+  
+  // 监听内容变化
+  editor.onDidChangeModelContent(() => {
+    const currentValue = editor.getValue()
+    hasUnsavedChanges.value = currentValue !== originalContent.value
+  })
+}
 
 // 加载文件内容
 async function loadFileContent() {
@@ -85,14 +176,23 @@ async function loadFileContent() {
   try {
     const content = await invoke('read_sftp_file', { 
       connectionId: props.connectionId,
-      remotePath: props.fileInfo.path 
+      path: props.fileInfo.path 
     })
     fileContent.value = content
-    editContent.value = content
+    originalContent.value = content
+    
+    // 等待DOM更新后初始化编辑器
+    await nextTick()
+    if (editor) {
+      editor.setValue(content)
+      hasUnsavedChanges.value = false
+    } else {
+      initMonacoEditor()
+    }
   } catch (error) {
     console.error('加载文件失败:', error)
-    if (typeof error === 'string' && error.includes('二进制文件')) {
-      message.warning('无法编辑二进制文件，请下载后查看')
+    if (typeof error === 'string' && error.includes('UTF-8')) {
+      message.warning('无法加载非文本文件，请下载后查看')
     } else {
       message.error('加载文件失败: ' + error)
     }
@@ -101,32 +201,21 @@ async function loadFileContent() {
   }
 }
 
-// 开始编辑
-function startEditing() {
-  isEditing.value = true
-  editContent.value = fileContent.value
-}
-
-// 取消编辑
-function cancelEditing() {
-  isEditing.value = false
-  editContent.value = fileContent.value
-}
-
 // 保存文件
 async function saveFile() {
-  if (!props.connectionId) return
+  if (!props.connectionId || !editor) return
   
   saving.value = true
   try {
+    const content = editor.getValue()
     await invoke('write_sftp_file', {
       connectionId: props.connectionId,
-      remotePath: props.fileInfo.path,
-      content: editContent.value
+      path: props.fileInfo.path,
+      content: content
     })
     
-    fileContent.value = editContent.value
-    isEditing.value = false
+    originalContent.value = content
+    hasUnsavedChanges.value = false
     message.success('文件保存成功')
   } catch (error) {
     console.error('保存文件失败:', error)
@@ -144,22 +233,43 @@ async function saveFile() {
   }
 }
 
+// 撤销更改
+function discardChanges() {
+  if (editor && originalContent.value) {
+    editor.setValue(originalContent.value)
+    hasUnsavedChanges.value = false
+    message.info('已撤销所有更改')
+  }
+}
+
 // 下载文件
 async function downloadFile() {
+  if (!props.connectionId) {
+    message.error('无法获取连接信息')
+    return
+  }
+  
   downloading.value = true
   try {
-    const content = fileContent.value || editContent.value
-    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = props.fileInfo.name
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-    URL.revokeObjectURL(url)
+    // 选择下载位置
+    const savePath = await invoke('select_download_location', {
+      fileName: props.fileInfo.name
+    })
     
-    message.success('文件下载成功')
+    if (!savePath) {
+      downloading.value = false
+      return // 用户取消了选择
+    }
+    
+    // 通过事件通知父组件开始下载
+    emit('startDownload', {
+      fileName: props.fileInfo.name,
+      remotePath: props.fileInfo.path,
+      savePath: savePath,
+      connectionId: props.connectionId
+    })
+    
+    message.info(`正在下载到: ${savePath}`)
   } catch (error) {
     console.error('下载文件失败:', error)
     message.error('下载文件失败: ' + error)
@@ -176,17 +286,44 @@ function formatFileSize(bytes) {
   return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i]
 }
 
+// 监听只读模式切换
+watch(() => readOnly.value, (newValue) => {
+  if (editor) {
+    editor.updateOptions({ readOnly: newValue })
+  }
+})
+
+// 监听主题变化
+watch(() => props.theme, (newTheme) => {
+  if (editor) {
+    monaco.editor.setTheme(newTheme === 'dark' ? 'vs-dark' : 'vs')
+  }
+})
+
 // 监听active状态变化
-watch(() => props.active, (newActive) => {
+watch(() => props.active, async (newActive) => {
   if (newActive && !fileContent.value) {
-    loadFileContent()
+    await loadFileContent()
+  }
+  // 当标签页激活时，重新调整编辑器大小
+  if (newActive && editor) {
+    await nextTick()
+    editor.layout()
   }
 })
 
 // 组件挂载时加载文件
-onMounted(() => {
+onMounted(async () => {
   if (props.active) {
-    loadFileContent()
+    await loadFileContent()
+  }
+})
+
+// 组件卸载时销毁编辑器
+onBeforeUnmount(() => {
+  if (editor) {
+    editor.dispose()
+    editor = null
   }
 })
 </script>
@@ -240,69 +377,22 @@ onMounted(() => {
 
 .editor-content {
   flex: 1;
-  padding: 16px;
   overflow: hidden;
+  position: relative;
+  min-height: 0;
 }
 
-.preview-mode {
-  height: 100%;
-  overflow: auto;
-}
-
-.file-content {
-  margin: 0;
-  padding: 16px;
-  background: var(--panel-bg);
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  font-family: 'Fira Code', 'Consolas', monospace;
-  font-size: 13px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-wrap: break-word;
-  color: var(--text-color);
-  max-height: 100%;
-  overflow: auto;
-}
-
-.edit-mode {
+.monaco-container {
+  width: 100%;
   height: 100%;
 }
 
-.editor-textarea {
-  font-family: 'Fira Code', 'Consolas', monospace !important;
-  font-size: 13px !important;
-  line-height: 1.5 !important;
-  background: var(--panel-bg) !important;
-  border-color: var(--border-color) !important;
-  color: var(--text-color) !important;
+/* 加载状态时的容器 */
+:deep(.ant-spin-container) {
+  height: 100%;
 }
 
-.editor-textarea:focus {
-  border-color: var(--primary-color) !important;
-  box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.2) !important;
-}
-
-/* 滚动条样式 */
-.file-content::-webkit-scrollbar,
-.editor-textarea::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-.file-content::-webkit-scrollbar-track,
-.editor-textarea::-webkit-scrollbar-track {
-  background: var(--panel-bg);
-}
-
-.file-content::-webkit-scrollbar-thumb,
-.editor-textarea::-webkit-scrollbar-thumb {
-  background: var(--border-color);
-  border-radius: 4px;
-}
-
-.file-content::-webkit-scrollbar-thumb:hover,
-.editor-textarea::-webkit-scrollbar-thumb:hover {
-  background: var(--muted-color);
+:deep(.ant-spin-nested-loading) {
+  height: 100%;
 }
 </style>

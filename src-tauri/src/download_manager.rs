@@ -78,18 +78,20 @@ pub async fn cancel_download(download_id: u32) -> Result<(), String> {
 // 打开文件位置
 #[command]
 pub async fn open_file_location(path: String) -> Result<(), String> {
-    let path = Path::new(&path);
+    println!("打开文件位置: {}", path);
+    let path_obj = Path::new(&path);
     
-    // 获取文件所在目录
-    let dir = if path.is_file() {
-        path.parent().unwrap_or(path)
-    } else {
-        path
-    };
+    // 检查文件是否存在
+    if !path_obj.exists() {
+        return Err(format!("文件不存在: {}", path));
+    }
+    
+    println!("文件存在，准备打开文件管理器");
     
     // 根据操作系统打开文件管理器
     #[cfg(target_os = "windows")]
     {
+        println!("使用 Windows Explorer 打开");
         std::process::Command::new("explorer")
             .arg("/select,")
             .arg(&path)
@@ -99,6 +101,7 @@ pub async fn open_file_location(path: String) -> Result<(), String> {
     
     #[cfg(target_os = "macos")]
     {
+        println!("使用 macOS Finder 打开");
         std::process::Command::new("open")
             .arg("-R")
             .arg(&path)
@@ -108,11 +111,18 @@ pub async fn open_file_location(path: String) -> Result<(), String> {
     
     #[cfg(target_os = "linux")]
     {
+        println!("使用 Linux 文件管理器打开");
+        let dir = if path_obj.is_file() {
+            path_obj.parent().unwrap_or(path_obj)
+        } else {
+            path_obj
+        };
         std::process::Command::new("xdg-open")
             .arg(dir)
             .spawn()
             .map_err(|e| format!("无法打开文件管理器: {}", e))?;
     }
     
+    println!("文件管理器已打开");
     Ok(())
 }

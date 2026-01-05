@@ -40,7 +40,7 @@ class SftpService {
     try {
       return await invoke('read_sftp_file', { 
         connectionId, 
-        remotePath: path 
+        path 
       });
     } catch (e) {
       console.error(`读取SFTP文件失败 (${path}):`, e);
@@ -58,7 +58,7 @@ class SftpService {
     try {
       await invoke('write_sftp_file', { 
         connectionId, 
-        remotePath: path, 
+        path, 
         content 
       });
     } catch (e) {
@@ -114,7 +114,7 @@ class SftpService {
     try {
       await invoke('delete_sftp_file', { 
         connectionId, 
-        remotePath: path 
+        path 
       });
     } catch (e) {
       console.error(`删除SFTP文件失败 (${path}):`, e);

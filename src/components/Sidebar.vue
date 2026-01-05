@@ -149,6 +149,9 @@
               <a-button @click="refreshSftpFiles" title="刷新">
                 <ReloadOutlined />
               </a-button>
+              <a-button @click="createNewFolder" title="新建文件夹">
+                <FolderAddOutlined />
+              </a-button>
             </a-button-group>
             
             <div class="toolbar-right">
@@ -168,7 +171,7 @@
           
           <div class="current-path">
             <a-input 
-              v-model:value="pathInput" 
+              v-model:value="currentSftpState.pathInput" 
               @pressEnter="navigateToPath"
               @blur="navigateToPath"
               size="small"
@@ -177,10 +180,18 @@
             />
           </div>
           
-          <div class="file-list" ref="fileListRef">
-            <a-spin :spinning="sftpLoading" size="small">
+          <div 
+            class="file-list" 
+            ref="fileListRef"
+            @drop.prevent="handleDrop"
+            @dragover.prevent="handleDragOver"
+            @dragleave.prevent="handleDragLeave"
+            @dragenter.prevent="handleDragEnter"
+            :class="{ 'drag-over': isDraggingOver }"
+          >
+            <a-spin :spinning="currentSftpState?.loading || false" size="small">
               <div 
-                v-for="file in sftpFiles" 
+                v-for="file in currentSftpState?.files || []" 
                 :key="file.name"
                 @click="handleSftpFileClick(file)"
                 @dblclick="handleSftpFileDoubleClick(file)"
@@ -192,6 +203,14 @@
                 <span class="file-name">{{ file.name }}</span>
                 <div v-if="!file.is_dir" class="file-size">
                   {{ formatFileSize(file.size) }}
+                </div>
+              </div>
+              
+              <!-- 拖拽提示 -->
+              <div v-if="isDraggingOver" class="drag-overlay">
+                <div class="drag-hint">
+                  <CloudUploadOutlined style="font-size: 48px;" />
+                  <div>释放以上传文件到当前目录</div>
                 </div>
               </div>
             </a-spin>
@@ -223,7 +242,9 @@ import {
   VideoCameraOutlined,
   SoundOutlined,
   EyeOutlined,
-  EyeInvisibleOutlined
+  EyeInvisibleOutlined,
+  CloudUploadOutlined,
+  FolderAddOutlined
 } from '@ant-design/icons-vue'
 import { Modal, message, Dropdown, Menu } from 'ant-design-vue'
 import { invoke } from '@tauri-apps/api/core'
@@ -315,63 +336,99 @@ function toggleGroup(groupName) {
   }
 }
 
-// SFTP相关状态  
-const sftpCurrentPath = ref('/')
-const pathInput = ref('/')
-const sftpFiles = ref([])
-const sftpLoading = ref(false)
-const sftpHistory = ref([])
-const sftpHistoryIndex = ref(-1)
+// SFTP相关状态 - 为每个连接保存独立状态
+const sftpStatesByConnection = ref(new Map())
 const fileListRef = ref(null)
 const showHiddenFiles = ref(false)
-// downloadManagerRef 将通过事件方式与父组件通信
+const isDraggingOver = ref(false)
 
-// 当前SFTP连接计算属性
-const currentSftpConnection = computed(() => {
-  if (!props.activeTab || props.activeTab.type !== 'ssh' || !props.activeTab.sftpConnectionId) {
-    return null
+// 创建初始SFTP状态
+function createInitialSftpState() {
+  return {
+    currentPath: '/',
+    pathInput: '/',
+    files: [],
+    loading: false,
+    history: [],
+    historyIndex: -1
+  }
+}
+
+// 获取当前连接ID
+const currentConnectionId = computed(() => {
+  if (!props.activeTab) return null
+  
+  // SSH标签页：使用 sftpConnectionId
+  if (props.activeTab.type === 'ssh' && props.activeTab.sftpConnectionId) {
+    return props.activeTab.sftpConnectionId
   }
   
+  // File标签页：使用 connectionId（从SSH继承）
+  if (props.activeTab.type === 'file' && props.activeTab.connectionId) {
+    return props.activeTab.connectionId
+  }
+  
+  // 其他类型（如local）不显示SFTP
+  return null
+})
+
+// 获取或创建当前连接的状态
+const currentSftpState = computed(() => {
+  const connId = currentConnectionId.value
+  if (!connId) return null
+  
+  // 如果这个连接是第一次使用，创建初始状态
+  if (!sftpStatesByConnection.value.has(connId)) {
+    sftpStatesByConnection.value.set(connId, createInitialSftpState())
+  }
+  
+  return sftpStatesByConnection.value.get(connId)
+})
+
+// 当前SFTP连接信息（用于显示）
+const currentSftpConnection = computed(() => {
+  if (!currentConnectionId.value) return null
+  
   return {
-    id: props.activeTab.sftpConnectionId,
-    title: props.activeTab.title
+    id: currentConnectionId.value,
+    title: props.activeTab?.title || 'SFTP'
   }
 })
 
 // SFTP导航状态
-const canSftpGoBack = computed(() => sftpHistoryIndex.value > 0)
-const sftpIsAtRoot = computed(() => !sftpCurrentPath.value || sftpCurrentPath.value === '/')
+const canSftpGoBack = computed(() => {
+  const state = currentSftpState.value
+  return state ? state.historyIndex > 0 : false
+})
 
-// 监听当前标签页变化，自动加载SFTP文件
-watch(() => currentSftpConnection.value, async (newConnection, oldConnection) => {
-  if (newConnection && newConnection.id !== oldConnection?.id) {
-    // 切换到不同的SFTP连接，重置状态并加载根目录
-    sftpCurrentPath.value = '/'
-    pathInput.value = '/'
-    sftpFiles.value = []
-    sftpHistory.value = []
-    sftpHistoryIndex.value = -1
+const sftpIsAtRoot = computed(() => {
+  const state = currentSftpState.value
+  return state ? (!state.currentPath || state.currentPath === '/') : true
+})
+
+// 监听连接ID变化，按需加载SFTP文件
+watch(() => currentConnectionId.value, async (newConnId, oldConnId) => {
+  if (newConnId && newConnId !== oldConnId) {
+    // 切换到了不同的连接
+    const state = currentSftpState.value
     
-    try {
-      await loadSftpFiles('/')
-    } catch (error) {
-      console.warn('加载SFTP文件失败:', error)
+    // 如果是新连接且还没加载过文件，加载根目录
+    if (state && state.files.length === 0 && state.currentPath === '/') {
+      try {
+        await loadSftpFiles('/')
+      } catch (error) {
+        console.warn('加载SFTP文件失败:', error)
+      }
     }
-  } else if (!newConnection) {
-    // 没有SFTP连接，清空文件列表
-    sftpFiles.value = []
-    sftpCurrentPath.value = '/'
-    pathInput.value = '/'
-    sftpHistory.value = []
-    sftpHistoryIndex.value = -1
   }
 }, { immediate: false })
 
 // 加载SFTP文件列表
 async function loadSftpFiles(path) {
-  if (!currentSftpConnection.value) return
+  const state = currentSftpState.value
+  if (!state || !currentSftpConnection.value) return
   
-  sftpLoading.value = true
+  state.loading = true
   try {
     // 使用后端API加载文件
     const files = await invoke('list_sftp_files', { 
@@ -380,35 +437,38 @@ async function loadSftpFiles(path) {
     })
     
     // 根据设置过滤隐藏文件
-    sftpFiles.value = showHiddenFiles.value 
+    state.files = showHiddenFiles.value 
       ? files 
       : files.filter(file => !file.name.startsWith('.'))
     
     // 更新历史记录
-    if (sftpHistoryIndex.value === -1 || sftpHistory.value[sftpHistoryIndex.value] !== path) {
-      sftpHistory.value = sftpHistory.value.slice(0, sftpHistoryIndex.value + 1)
-      sftpHistory.value.push(path)
-      sftpHistoryIndex.value = sftpHistory.value.length - 1
+    if (state.historyIndex === -1 || state.history[state.historyIndex] !== path) {
+      state.history = state.history.slice(0, state.historyIndex + 1)
+      state.history.push(path)
+      state.historyIndex = state.history.length - 1
     }
     
-    sftpCurrentPath.value = path
-    pathInput.value = path // 同步更新路径输入框
+    state.currentPath = path
+    state.pathInput = path // 同步更新路径输入框
   } catch (error) {
     console.error('加载文件列表失败:', error)
     message.error('加载文件列表失败: ' + error)
   } finally {
-    sftpLoading.value = false
+    state.loading = false
   }
 }
 
 // 导航到指定路径
 function navigateToPath() {
-  const path = pathInput.value.trim()
-  if (path && path !== sftpCurrentPath.value) {
+  const state = currentSftpState.value
+  if (!state) return
+  
+  const path = state.pathInput.trim()
+  if (path && path !== state.currentPath) {
     loadSftpFiles(path)
   } else {
     // 如果输入为空或与当前路径相同，恢复原值
-    pathInput.value = sftpCurrentPath.value
+    state.pathInput = state.currentPath
   }
 }
 
@@ -420,19 +480,21 @@ function handleSftpFileClick(file) {
 
 // SFTP文件双击处理
 function handleSftpFileDoubleClick(file) {
+  const state = currentSftpState.value
+  if (!state) return
+  
   if (file.is_dir) {
     // 文件夹双击进入
-    const newPath = sftpCurrentPath.value === '/' 
+    const newPath = state.currentPath === '/' 
       ? `/${file.name}` 
-      : `${sftpCurrentPath.value}/${file.name}`
+      : `${state.currentPath}/${file.name}`
     loadSftpFiles(newPath)
   } else {
-    // 文件双击执行操作
+    // 文件双击仅在文本文件时打开预览，其他文件不做任何操作
     if (isTextFile(file.name)) {
       openFilePreview(file)
-    } else {
-      showFileActions(file)
     }
+    // 移除了对非文本文件的showFileActions调用
   }
 }
 
@@ -449,9 +511,12 @@ function isTextFile(filename) {
 
 // 打开文件预览
 async function openFilePreview(file) {
-  const filePath = sftpCurrentPath.value === '/' 
+  const state = currentSftpState.value
+  if (!state) return
+  
+  const filePath = state.currentPath === '/' 
     ? `/${file.name}` 
-    : `${sftpCurrentPath.value}/${file.name}`
+    : `${state.currentPath}/${file.name}`
     
   emit('openFilePreview', {
     name: file.name,
@@ -473,10 +538,13 @@ function showFileActions(file) {
 
 // 下载文件
 async function downloadFile(file) {
+  const state = currentSftpState.value
+  if (!state || !currentSftpConnection.value) return
+  
   try {
-    const remotePath = sftpCurrentPath.value === '/' 
+    const remotePath = state.currentPath === '/' 
       ? `/${file.name}` 
-      : `${sftpCurrentPath.value}/${file.name}`
+      : `${state.currentPath}/${file.name}`
     
     // 选择下载位置
     const savePath = await invoke('select_download_location', {
@@ -503,36 +571,168 @@ async function downloadFile(file) {
 
 // SFTP导航
 function sftpGoBack() {
-  if (canSftpGoBack.value) {
-    sftpHistoryIndex.value--
-    loadSftpFiles(sftpHistory.value[sftpHistoryIndex.value])
-  }
+  const state = currentSftpState.value
+  if (!state || !canSftpGoBack.value) return
+  
+  state.historyIndex--
+  loadSftpFiles(state.history[state.historyIndex])
 }
 
 async function sftpGoUp() {
-  if (!sftpIsAtRoot.value) {
-    const parts = sftpCurrentPath.value.split('/').filter(p => p)
-    parts.pop()
-    const newPath = parts.length > 0 ? '/' + parts.join('/') : '/'
-    loadSftpFiles(newPath)
-  }
+  const state = currentSftpState.value
+  if (!state || sftpIsAtRoot.value) return
+  
+  const parts = state.currentPath.split('/').filter(p => p)
+  parts.pop()
+  const newPath = parts.length > 0 ? '/' + parts.join('/') : '/'
+  loadSftpFiles(newPath)
 }
 
 function refreshSftpFiles() {
-  loadSftpFiles(sftpCurrentPath.value)
+  const state = currentSftpState.value
+  if (!state) return
+  
+  loadSftpFiles(state.currentPath)
 }
 
 // 切换隐藏文件显示
 function toggleShowHidden() {
+  const state = currentSftpState.value
+  if (!state) return
+  
   showHiddenFiles.value = !showHiddenFiles.value
   // 重新加载当前目录
-  loadSftpFiles(sftpCurrentPath.value)
+  loadSftpFiles(state.currentPath)
 }
 
 // 显示SFTP右键菜单
 function showSftpContextMenu(event, file) {
-  // 右键菜单功能
-  console.log('右键菜单', file)
+  event.preventDefault()
+  
+  // 移除已存在的菜单
+  const existingMenu = document.querySelector('.sftp-context-menu')
+  if (existingMenu) {
+    existingMenu.remove()
+  }
+  
+  // 创建菜单
+  const menu = document.createElement('div')
+  menu.className = 'sftp-context-menu'
+  menu.style.cssText = `
+    position: fixed;
+    left: ${event.clientX}px;
+    top: ${event.clientY}px;
+    background: var(--panel-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    z-index: 10000;
+    min-width: 150px;
+    padding: 4px 0;
+  `
+  
+  // 菜单项
+  const menuItems = []
+  
+  // 下载
+  menuItems.push({
+    label: '📥 下载',
+    action: () => {
+      downloadFile(file)
+      menu.remove()
+    }
+  })
+  
+  // 如果是文本文件，添加打开/预览选项
+  if (!file.is_dir && isTextFile(file.name)) {
+    menuItems.push({
+      label: '📄 打开',
+      action: () => {
+        openFilePreview(file)
+        menu.remove()
+      }
+    })
+  }
+  
+  // 分隔线
+  menuItems.push({ divider: true })
+  
+  // 重命名
+  menuItems.push({
+    label: '✏️ 重命名',
+    action: () => {
+      renameFile(file)
+      menu.remove()
+    }
+  })
+  
+  // 删除
+  menuItems.push({
+    label: '🗑️ 删除',
+    action: () => {
+      deleteFile(file)
+      menu.remove()
+    },
+    danger: true
+  })
+  
+  // 分隔线
+  menuItems.push({ divider: true })
+  
+  // 复制路径
+  menuItems.push({
+    label: '📋 复制路径',
+    action: () => {
+      copyFilePath(file)
+      menu.remove()
+    }
+  })
+  
+  // 添加菜单项
+  menuItems.forEach(item => {
+    if (item.divider) {
+      const divider = document.createElement('div')
+      divider.style.cssText = `
+        height: 1px;
+        background: var(--border-color);
+        margin: 4px 0;
+      `
+      menu.appendChild(divider)
+    } else {
+      const menuItem = document.createElement('div')
+      menuItem.style.cssText = `
+        padding: 8px 16px;
+        cursor: pointer;
+        color: ${item.danger ? 'var(--error-color)' : 'var(--text-color)'};
+        font-size: 14px;
+        transition: background-color 0.2s;
+      `
+      menuItem.textContent = item.label
+      menuItem.addEventListener('mouseenter', () => {
+        menuItem.style.backgroundColor = 'var(--hover-bg)'
+      })
+      menuItem.addEventListener('mouseleave', () => {
+        menuItem.style.backgroundColor = 'transparent'
+      })
+      menuItem.addEventListener('click', item.action)
+      menu.appendChild(menuItem)
+    }
+  })
+  
+  // 添加到页面
+  document.body.appendChild(menu)
+  
+  // 点击其他地方关闭菜单
+  const closeMenu = (e) => {
+    if (!menu.contains(e.target)) {
+      menu.remove()
+      document.removeEventListener('click', closeMenu)
+    }
+  }
+  
+  setTimeout(() => {
+    document.addEventListener('click', closeMenu)
+  }, 0)
 }
 
 // 获取文件图标
@@ -563,6 +763,244 @@ function formatFileSize(bytes) {
   const sizes = ['B', 'KB', 'MB', 'GB']
   const i = Math.floor(Math.log(bytes) / Math.log(1024))
   return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i]
+}
+
+// 重命名文件/文件夹
+async function renameFile(file) {
+  Modal.confirm({
+    title: '重命名',
+    content: () => {
+      const input = document.createElement('input')
+      input.value = file.name
+      input.style.cssText = 'width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--panel-bg); color: var(--text-color);'
+      setTimeout(() => {
+        input.focus()
+        // 选中文件名（不包含扩展名）
+        if (!file.is_dir) {
+          const lastDotIndex = file.name.lastIndexOf('.')
+          if (lastDotIndex > 0) {
+            input.setSelectionRange(0, lastDotIndex)
+          } else {
+            input.select()
+          }
+        } else {
+          input.select()
+        }
+      }, 100)
+      
+      return input
+    },
+    okText: '重命名',
+    cancelText: '取消',
+    onOk: async () => {
+      const input = document.querySelector('.ant-modal-body input')
+      const newName = input?.value?.trim()
+      
+      if (!newName || newName === file.name) {
+        return
+      }
+      
+      const state = currentSftpState.value
+      if (!state || !currentSftpConnection.value) return
+      
+      try {
+        const oldPath = state.currentPath === '/' 
+          ? `/${file.name}` 
+          : `${state.currentPath}/${file.name}`
+        const newPath = state.currentPath === '/' 
+          ? `/${newName}` 
+          : `${state.currentPath}/${newName}`
+        
+        await invoke('rename_sftp_file', {
+          connectionId: currentSftpConnection.value.id,
+          oldPath,
+          newPath
+        })
+        
+        message.success('重命名成功')
+        refreshSftpFiles()
+      } catch (error) {
+        console.error('重命名失败:', error)
+        message.error('重命名失败: ' + error)
+      }
+    }
+  })
+}
+
+// 删除文件/文件夹
+async function deleteFile(file) {
+  Modal.confirm({
+    title: '确认删除',
+    content: `确定要删除 "${file.name}" 吗？此操作无法撤销。`,
+    okText: '删除',
+    okType: 'danger',
+    cancelText: '取消',
+    onOk: async () => {
+      const state = currentSftpState.value
+      if (!state || !currentSftpConnection.value) return
+      
+      try {
+        const filePath = state.currentPath === '/' 
+          ? `/${file.name}` 
+          : `${state.currentPath}/${file.name}`
+        
+        if (file.is_dir) {
+          await invoke('delete_sftp_directory', {
+            connectionId: currentSftpConnection.value.id,
+            path: filePath
+          })
+        } else {
+          await invoke('delete_sftp_file', {
+            connectionId: currentSftpConnection.value.id,
+            path: filePath
+          })
+        }
+        
+        message.success('删除成功')
+        refreshSftpFiles()
+      } catch (error) {
+        console.error('删除失败:', error)
+        message.error('删除失败: ' + error)
+      }
+    }
+  })
+}
+
+// 复制文件路径
+function copyFilePath(file) {
+  const state = currentSftpState.value
+  if (!state) return
+  
+  const filePath = state.currentPath === '/' 
+    ? `/${file.name}` 
+    : `${state.currentPath}/${file.name}`
+  
+  navigator.clipboard.writeText(filePath).then(() => {
+    message.success('路径已复制到剪贴板')
+  }).catch(err => {
+    console.error('复制失败:', err)
+    message.error('复制失败')
+  })
+}
+
+// 拖拽事件处理
+function handleDragEnter(event) {
+  if (!currentSftpConnection.value) return
+  isDraggingOver.value = true
+}
+
+function handleDragOver(event) {
+  if (!currentSftpConnection.value) return
+  event.dataTransfer.dropEffect = 'copy'
+}
+
+function handleDragLeave(event) {
+  // 只在离开整个区域时设置为false
+  if (event.target === fileListRef.value) {
+    isDraggingOver.value = false
+  }
+}
+
+async function handleDrop(event) {
+  isDraggingOver.value = false
+  
+  if (!currentSftpConnection.value) {
+    message.warning('没有活动的SFTP连接')
+    return
+  }
+  
+  const files = event.dataTransfer?.files
+  if (!files || files.length === 0) return
+  
+  // 上传所有文件
+  for (const file of files) {
+    await uploadFileToServer(file)
+  }
+}
+
+// 上传文件到服务器
+async function uploadFileToServer(file) {
+  const state = currentSftpState.value
+  if (!state || !currentSftpConnection.value) return
+  
+  try {
+    // 获取文件路径（Tauri会处理这个）
+    const localPath = file.path
+    
+    if (!localPath) {
+      message.error(`无法获取文件路径: ${file.name}`)
+      return
+    }
+    
+    const remotePath = state.currentPath === '/' 
+      ? `/${file.name}` 
+      : `${state.currentPath}/${file.name}`
+    
+    message.loading(`正在上传 ${file.name}...`, 0)
+    
+    await invoke('upload_sftp_file', {
+      connectionId: currentSftpConnection.value.id,
+      localPath,
+      remotePath
+    })
+    
+    message.destroy()
+    message.success(`上传成功: ${file.name}`)
+    
+    // 刷新文件列表
+    refreshSftpFiles()
+    
+  } catch (error) {
+    message.destroy()
+    console.error('上传文件失败:', error)
+    message.error(`上传失败: ${file.name} - ${error}`)
+  }
+}
+
+// 创建新文件夹
+async function createNewFolder() {
+  const state = currentSftpState.value
+  if (!state || !currentSftpConnection.value) return
+  
+  Modal.confirm({
+    title: '新建文件夹',
+    content: () => {
+      const input = document.createElement('input')
+      input.placeholder = '请输入文件夹名称'
+      input.style.cssText = 'width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--panel-bg); color: var(--text-color);'
+      setTimeout(() => input.focus(), 100)
+      return input
+    },
+    okText: '创建',
+    cancelText: '取消',
+    onOk: async () => {
+      const input = document.querySelector('.ant-modal-body input')
+      const folderName = input?.value?.trim()
+      
+      if (!folderName) {
+        message.warning('请输入文件夹名称')
+        return Promise.reject()
+      }
+      
+      try {
+        const folderPath = state.currentPath === '/' 
+          ? `/${folderName}` 
+          : `${state.currentPath}/${folderName}`
+        
+        await invoke('create_sftp_directory', {
+          connectionId: currentSftpConnection.value.id,
+          path: folderPath
+        })
+        
+        message.success('文件夹创建成功')
+        refreshSftpFiles()
+      } catch (error) {
+        console.error('创建文件夹失败:', error)
+        message.error('创建文件夹失败: ' + error)
+        return Promise.reject()
+      }
+    }
+  })
 }
 
 // 删除配置文件
@@ -971,6 +1409,41 @@ function copyProfileConfig(profile) {
   resize: vertical;
   border: 1px solid var(--border-color);
   border-radius: 4px;
+  position: relative;
+  transition: border-color 0.3s, background-color 0.3s;
+}
+
+.file-list.drag-over {
+  border-color: var(--primary-color);
+  border-width: 2px;
+  background-color: rgba(24, 144, 255, 0.05);
+}
+
+.drag-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(24, 144, 255, 0.1);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  pointer-events: none;
+}
+
+.drag-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  color: var(--primary-color);
+  font-size: 16px;
+  font-weight: 500;
+  text-align: center;
+  padding: 20px;
 }
 
 .file-item {

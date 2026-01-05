@@ -57,7 +57,10 @@ pub fn run() {
       sftp_russh::read_sftp_file,
       sftp_russh::write_sftp_file,
       sftp_russh::delete_sftp_file,
+      sftp_russh::delete_sftp_directory,
       sftp_russh::create_sftp_directory,
+      sftp_russh::rename_sftp_file,
+      sftp_russh::get_sftp_file_metadata,
       
       // System monitor commands
       system_monitor::get_system_info,

@@ -1,17 +1,23 @@
 <template>
-  <div class="right-panel" :class="{ collapsed: collapsed }">
-    <div class="panel-header" @click="$emit('toggle')">
-      <span>系统监控</span>
-      <a-button 
-        type="text" 
-        size="small" 
-        class="collapse-btn"
-      >
-        {{ collapsed ? '<' : '>' }}
-      </a-button>
-    </div>
+  <div class="right-panel">
+    <!-- 内容区 - 可折叠，在左侧 -->
+    <div class="panel-content-wrapper" :class="{ collapsed: collapsed }">
     
-    <div class="panel-content" v-if="!collapsed">
+      <!-- 标题栏 -->
+      <div class="panel-header">
+        <span>{{ activeTab === 'monitor' ? '系统监控' : '下载管理' }}</span>
+        <a-button 
+          type="text" 
+          size="small" 
+          class="collapse-btn"
+          @click="$emit('toggle')"
+        >
+          <RightOutlined />
+        </a-button>
+      </div>
+      
+      <!-- 系统监控内容 -->
+      <div class="panel-content monitor-content" v-if="activeTab === 'monitor'">
       <a-spin :spinning="loading">
         <!-- 系统基本信息 -->
         <div class="info-section">
@@ -191,7 +197,98 @@
       </a-spin>
     </div>
     
-    <div class="panel-footer" v-if="!collapsed">
+    <!-- 下载管理内容 -->
+    <div class="panel-content download-content" v-if="activeTab === 'download'">
+      <div v-if="downloads.length === 0" class="empty-state">
+        <a-empty description="暂无下载任务" />
+      </div>
+      
+      <div v-else class="download-list">
+        <div 
+          v-for="download in downloads" 
+          :key="download.id"
+          class="download-item"
+          :class="{ 
+            completed: download.status === 'completed', 
+            error: download.status === 'error' 
+          }"
+        >
+          <div class="download-info">
+            <div class="file-name">{{ download.fileName }}</div>
+            <div class="file-path">{{ download.savePath }}</div>
+            
+            <!-- 进度条 -->
+            <a-progress 
+              v-if="download.status === 'downloading'"
+              :percent="download.progress" 
+              size="small"
+              :show-info="false"
+            />
+            
+            <!-- 状态信息 -->
+            <div class="download-status">
+              <span v-if="download.status === 'downloading'">
+                <template v-if="download.total > 0">
+                  {{ formatSize(download.downloaded) }} / {{ formatSize(download.total) }}
+                  <span v-if="download.progress > 0">({{ download.progress }}%)</span>
+                </template>
+                <template v-else>
+                  正在下载...
+                </template>
+              </span>
+              <span v-else-if="download.status === 'completed'" class="success">
+                完成 - {{ formatSize(download.total) }}
+              </span>
+              <span v-else-if="download.status === 'error'" class="error">
+                失败: {{ download.error }}
+              </span>
+            </div>
+          </div>
+          
+          <div class="download-actions">
+            <a-button 
+              v-if="download.status === 'downloading'"
+              type="text" 
+              size="small" 
+              danger
+              @click="cancelDownload(download.id)"
+              title="取消"
+            >
+              <StopOutlined />
+            </a-button>
+            
+            <a-button 
+              v-if="download.status === 'completed'"
+              type="text" 
+              size="small"
+              @click="openFileLocation(download.savePath)"
+              title="打开"
+            >
+              <FolderOpenOutlined />
+            </a-button>
+            
+            <a-button 
+              type="text" 
+              size="small" 
+              danger
+              @click="removeDownload(download.id)"
+              title="移除"
+            >
+              <DeleteOutlined />
+            </a-button>
+          </div>
+        </div>
+      </div>
+      
+      <div class="download-footer" v-if="downloads.length > 0">
+        <a-button size="small" @click="clearCompleted">
+          清除已完成
+        </a-button>
+      </div>
+    </div>
+    
+    <!-- 底部状态栏 - 仅监控页显示 -->
+    <div class="panel-footer" v-if="activeTab === 'monitor'">
       <a-button size="small" @click="manualRefresh" :loading="loading">
         <ReloadOutlined />
         刷新
@@ -201,11 +298,37 @@
         {{ lastUpdate ? new Date(lastUpdate).toLocaleTimeString() : '-' }}
       </span>
     </div>
+    </div>
+    
+    <!-- 按钮栏 - 始终显示，在最右侧 -->
+    <div class="sidebar-buttons">
+      <a-tooltip placement="left" title="系统监控">
+        <a-button 
+          :type="activeTab === 'monitor' ? 'primary' : 'default'"
+          size="large"
+          @click="handleTabClick('monitor')"
+          class="sidebar-btn"
+        >
+          <DesktopOutlined />
+        </a-button>
+      </a-tooltip>
+      
+      <a-tooltip placement="left" title="下载管理">
+        <a-button 
+          :type="activeTab === 'download' ? 'primary' : 'default'"
+          size="large"
+          @click="handleTabClick('download')"
+          class="sidebar-btn"
+        >
+          <DownloadOutlined />
+        </a-button>
+      </a-tooltip>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { 
   ReloadOutlined,
   DesktopOutlined,
@@ -217,10 +340,16 @@ import {
   ThunderboltOutlined,
   DatabaseOutlined,
   HddOutlined,
-  WifiOutlined
+  WifiOutlined,
+  DownloadOutlined,
+  StopOutlined,
+  FolderOpenOutlined,
+  DeleteOutlined,
+  RightOutlined
 } from '@ant-design/icons-vue'
 import { message } from 'ant-design-vue'
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 
 const props = defineProps({
   collapsed: {
@@ -244,6 +373,32 @@ const cpuInfo = ref({})
 const memoryInfo = ref({})
 const diskInfo = ref([])
 const networkInfo = ref([])
+
+// 下载管理状态
+const activeTab = ref('monitor') // 'monitor' or 'download'
+const downloads = ref([])
+let downloadIdCounter = 0
+let progressUnlisten = null
+
+// 活跃下载数量
+const activeDownloads = computed(() => {
+  return downloads.value.filter(d => d.status === 'downloading').length
+})
+
+// 处理标签点击
+function handleTabClick(tab) {
+  // 如果点击的是当前激活的标签，切换折叠状态
+  if (activeTab.value === tab) {
+    emit('toggle')
+  } else {
+    // 切换到新标签
+    activeTab.value = tab
+    // 如果当前是折叠状态，自动展开
+    if (props.collapsed) {
+      emit('toggle')
+    }
+  }
+}
 
 let refreshTimer = null
 let refreshInterval = 3000 // 初始刷新间隔3秒
@@ -364,12 +519,28 @@ function getProgressColor(percentage) {
 }
 
 // 生命周期
-onMounted(() => {
+onMounted(async () => {
   // 不自动刷新，等待用户手动展开
+  
+  // 监听下载进度事件
+  progressUnlisten = await listen('download-progress', (event) => {
+    const { downloadId, downloaded, total, progress } = event.payload
+    const download = downloads.value.find(d => d.id === downloadId)
+    if (download && download.status === 'downloading') {
+      download.downloaded = downloaded
+      download.total = total
+      download.progress = progress
+      console.log(`📥 下载进度: ${download.fileName} - ${progress}% (${formatSize(downloaded)}/${formatSize(total)})`)
+    }
+  })
 })
 
 onUnmounted(() => {
   stopAutoRefresh()
+  // 取消事件监听
+  if (progressUnlisten) {
+    progressUnlisten()
+  }
 })
 
 // 监听属性变化
@@ -394,20 +565,169 @@ watch(() => props.connectionId, (newConnectionId) => {
     stopAutoRefresh()
   }
 })
+
+// ============ 下载管理函数 ============
+
+// 添加下载任务
+function addDownload(fileName, remotePath, savePath, connectionId) {
+  console.log('=== addDownload 被调用 ===', {
+    fileName,
+    remotePath,
+    savePath,
+    connectionId
+  })
+  
+  const downloadId = ++downloadIdCounter
+  const download = {
+    id: downloadId,
+    fileName,
+    remotePath,
+    savePath,
+    connectionId,
+    status: 'downloading',
+    progress: 0,
+    downloaded: 0,
+    total: 0,
+    startTime: Date.now(),
+    error: null
+  }
+  
+  downloads.value.push(download)
+  console.log('下载任务已添加到列表，开始下载...')
+  startDownload(download)
+  
+  // 自动切换到下载标签页
+  activeTab.value = 'download'
+  
+  return downloadId
+}
+
+// 开始下载
+async function startDownload(download) {
+  console.log('=== startDownload 开始（真实进度）===', download)
+  
+  try {
+    console.log('开始调用 download_sftp_file API（带真实进度）...')
+    
+    // 调用后端下载API（带真实进度）
+    await invoke('download_sftp_file', {
+      connectionId: download.connectionId,
+      remotePath: download.remotePath,
+      localPath: download.savePath,
+      downloadId: download.id
+    })
+    
+    console.log('✓ download_sftp_file API 调用成功')
+    
+    if (download.status !== 'cancelled') {
+      download.status = 'completed'
+      download.progress = 100
+      console.log('✓ 下载完成！')
+      message.success(`文件下载完成: ${download.fileName}`)
+    }
+  } catch (error) {
+    console.error('✗ 下载过程中出错:', error)
+    if (download.status !== 'cancelled') {
+      download.status = 'error'
+      download.error = error.toString()
+      message.error(`下载失败: ${download.fileName}`)
+    }
+  }
+}
+
+// 取消下载
+function cancelDownload(downloadId) {
+  const download = downloads.value.find(d => d.id === downloadId)
+  if (download) {
+    download.status = 'cancelled'
+    message.info(`已取消下载: ${download.fileName}`)
+  }
+}
+
+// 打开文件位置
+async function openFileLocation(filePath) {
+  console.log('打开文件位置:', filePath)
+  try {
+    await invoke('open_file_location', { path: filePath })
+    message.success('已打开文件所在位置')
+  } catch (error) {
+    console.error('打开文件位置失败:', error)
+    message.error('无法打开文件位置: ' + error)
+  }
+}
+
+// 移除下载记录
+function removeDownload(downloadId) {
+  const index = downloads.value.findIndex(d => d.id === downloadId)
+  if (index !== -1) {
+    downloads.value.splice(index, 1)
+  }
+}
+
+// 清除已完成的下载
+function clearCompleted() {
+  downloads.value = downloads.value.filter(d => 
+    d.status === 'downloading'
+  )
+}
+
+// 暴露方法给父组件
+defineExpose({
+  addDownload
+})
 </script>
 
 <style scoped>
 .right-panel {
-  width: 280px;
-  background: var(--panel-bg);
-  border-left: 1px solid var(--border-color);
   display: flex;
-  flex-direction: column;
-  transition: width 0.3s ease;
+  background: var(--panel-bg);
+  height: 100%;
+  position: relative;
 }
 
-.right-panel.collapsed {
-  width: 50px;
+/* 内容区 - 在左侧，可折叠 */
+.panel-content-wrapper {
+  display: flex;
+  flex-direction: column;
+  width: 280px;
+  border-left: 1px solid var(--border-color);
+  transition: width 0.3s ease, opacity 0.3s ease;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.panel-content-wrapper.collapsed {
+  width: 0;
+  opacity: 0;
+  pointer-events: none;
+  border-left: none;
+}
+
+/* 按钮栏 - 在最右侧，始终可见 */
+.sidebar-buttons {
+  width: 60px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 8px;
+  background: var(--panel-header-bg);
+  border-left: 1px solid var(--border-color);
+  margin-left: auto;
+}
+
+.sidebar-btn {
+  width: 44px !important;
+  height: 44px !important;
+  padding: 0 !important;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+}
+
+.sidebar-btn :deep(.anticon) {
+  font-size: 20px;
 }
 
 .panel-header {
@@ -434,9 +754,13 @@ watch(() => props.connectionId, (newConnectionId) => {
 }
 
 .panel-content {
-  flex: 1;
   padding: 16px;
   overflow-y: auto;
+}
+
+.monitor-content {
+  flex: 1;
+  min-height: 0;
 }
 
 .panel-footer {
@@ -873,6 +1197,98 @@ watch(() => props.connectionId, (newConnectionId) => {
 
 .panel-content::-webkit-scrollbar-thumb:hover {
   background: var(--muted-color);
+}
+
+
+/* 下载管理内容 */
+.download-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.empty-state {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.download-list {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.download-item {
+  display: flex;
+  align-items: center;
+  padding: 12px;
+  border-bottom: 1px solid var(--border-color);
+  transition: background-color 0.2s;
+}
+
+.download-item:hover {
+  background: var(--hover-bg);
+}
+
+.download-item.completed {
+  background: rgba(82, 196, 26, 0.05);
+}
+
+.download-item.error {
+  background: rgba(255, 77, 79, 0.05);
+}
+
+.download-info {
+  flex: 1;
+  margin-right: 8px;
+  min-width: 0;
+}
+
+.download-info .file-name {
+  font-weight: 500;
+  font-size: 13px;
+  color: var(--text-color);
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.download-info .file-path {
+  font-size: 11px;
+  color: var(--muted-color);
+  font-family: monospace;
+  margin-bottom: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.download-status {
+  font-size: 11px;
+  margin-top: 4px;
+}
+
+.download-status .success {
+  color: var(--success-color);
+}
+
+.download-status .error {
+  color: var(--error-color);
+}
+
+.download-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.download-footer {
+  padding: 8px 16px;
+  border-top: 1px solid var(--border-color);
+  background: var(--panel-header-bg);
 }
 
 /* 响应式设计 */

@@ -6,6 +6,8 @@ use std::sync::Arc;
 use russh::*;
 use russh_keys::*;
 use russh_sftp::client::SftpSession;
+use tokio::io::{AsyncWriteExt, AsyncReadExt};
+use tauri::Emitter;
 
 // SFTP文件信息
 #[derive(Serialize, Deserialize, Debug)]
@@ -203,12 +205,14 @@ pub async fn list_sftp_files(connection_id: String, path: String) -> Result<Vec<
         }
 }
 
-// 下载SFTP文件
+// 下载SFTP文件（带真实进度）
 #[tauri::command]
 pub async fn download_sftp_file(
+    app: tauri::AppHandle,
     connection_id: String, 
     remote_path: String, 
-    local_path: String
+    local_path: String,
+    download_id: u32
 ) -> Result<(), String> {
     let session = {
         let connections = SFTP_CONNECTIONS.lock();
@@ -219,22 +223,91 @@ pub async fn download_sftp_file(
         connection.session.clone()
     }; // 锁在这里自动释放
         
-        println!("下载文件: {} -> {}", remote_path, local_path);
-        
-        // 读取远程文件
-        let data = match session.read(&remote_path).await {
-            Ok(data) => data,
+    println!("下载文件(带进度): {} -> {}", remote_path, local_path);
+    
+    // 首先获取文件大小
+    let metadata = match session.metadata(&remote_path).await {
+        Ok(meta) => meta,
+        Err(e) => return Err(format!("获取文件元数据失败: {}", e)),
+    };
+    
+    let total_size = metadata.len();
+    println!("文件总大小: {} 字节", total_size);
+    
+    // 发送初始进度
+    let _ = app.emit("download-progress", serde_json::json!({
+        "downloadId": download_id,
+        "downloaded": 0,
+        "total": total_size,
+        "progress": 0
+    }));
+    
+    // 打开远程文件进行读取
+    let mut file = match session.open(&remote_path).await {
+        Ok(f) => f,
+        Err(e) => return Err(format!("打开远程文件失败: {}", e)),
+    };
+    
+    // 创建本地文件
+    let mut local_file = match tokio::fs::File::create(&local_path).await {
+        Ok(f) => f,
+        Err(e) => return Err(format!("创建本地文件失败: {}", e)),
+    };
+    
+    // 分块读取和写入
+    const CHUNK_SIZE: usize = 32768; // 32KB 每块
+    let mut buffer = vec![0u8; CHUNK_SIZE];
+    let mut downloaded: u64 = 0;
+    let mut last_progress_percent = 0;
+    
+    loop {
+        // 使用 AsyncReadExt 的 read 方法读取一块数据
+        use tokio::io::AsyncReadExt;
+        let bytes_read = match file.read(&mut buffer).await {
+            Ok(n) => n,
             Err(e) => return Err(format!("读取远程文件失败: {}", e)),
         };
         
-        // 写入本地文件
-        match tokio::fs::write(&local_path, data).await {
-            Ok(_) => {
-                println!("文件下载成功");
-                Ok(())
-            },
-            Err(e) => Err(format!("写入本地文件失败: {}", e)),
+        if bytes_read == 0 {
+            break; // 文件读取完成
         }
+        
+        // 写入本地文件
+        if let Err(e) = local_file.write_all(&buffer[..bytes_read]).await {
+            return Err(format!("写入本地文件失败: {}", e));
+        }
+        
+        downloaded += bytes_read as u64;
+        
+        // 计算进度百分比
+        let progress = if total_size > 0 {
+            ((downloaded as f64 / total_size as f64) * 100.0) as u32
+        } else {
+            0
+        };
+        
+        // 只在进度变化时发送更新（避免过多事件）
+        if progress != last_progress_percent || downloaded == total_size {
+            last_progress_percent = progress;
+            
+            let _ = app.emit("download-progress", serde_json::json!({
+                "downloadId": download_id,
+                "downloaded": downloaded,
+                "total": total_size,
+                "progress": progress
+            }));
+            
+            println!("下载进度: {}/{} 字节 ({}%)", downloaded, total_size, progress);
+        }
+    }
+    
+    // 确保文件写入完成
+    if let Err(e) = local_file.flush().await {
+        return Err(format!("刷新文件缓冲失败: {}", e));
+    }
+    
+    println!("文件下载成功: {}", local_path);
+    Ok(())
 }
 
 // 上传文件到SFTP
@@ -375,4 +448,99 @@ pub fn create_sftp_from_ssh(_connection_id: String) -> Result<(), String> {
     // TODO: 实现从russh会话创建SFTP连接
     // 这需要在SSH终端模块中暴露会话，然后在这里复用
     Err("从SSH会话创建SFTP连接功能正在开发中".to_string())
+}
+
+// 重命名SFTP文件或目录
+#[tauri::command]
+pub async fn rename_sftp_file(
+    connection_id: String, 
+    old_path: String, 
+    new_path: String
+) -> Result<(), String> {
+    let session = {
+        let connections = SFTP_CONNECTIONS.lock();
+        let connection = match connections.get(&connection_id) {
+            Some(conn) => conn,
+            None => return Err("SFTP连接不存在".to_string()),
+        };
+        connection.session.clone()
+    };
+    
+    println!("重命名文件: {} -> {}", old_path, new_path);
+    
+    match session.rename(&old_path, &new_path).await {
+        Ok(_) => {
+            println!("文件重命名成功");
+            Ok(())
+        },
+        Err(e) => Err(format!("重命名文件失败: {}", e)),
+    }
+}
+
+// 删除SFTP目录（递归删除）
+#[tauri::command]
+pub async fn delete_sftp_directory(connection_id: String, path: String) -> Result<(), String> {
+    let session = {
+        let connections = SFTP_CONNECTIONS.lock();
+        let connection = match connections.get(&connection_id) {
+            Some(conn) => conn,
+            None => return Err("SFTP连接不存在".to_string()),
+        };
+        connection.session.clone()
+    };
+    
+    println!("删除目录: {}", path);
+    
+    match session.remove_dir(&path).await {
+        Ok(_) => {
+            println!("目录删除成功");
+            Ok(())
+        },
+        Err(e) => Err(format!("删除目录失败: {}", e)),
+    }
+}
+
+// 获取文件元数据
+#[tauri::command]
+pub async fn get_sftp_file_metadata(connection_id: String, path: String) -> Result<SftpFileInfo, String> {
+    let session = {
+        let connections = SFTP_CONNECTIONS.lock();
+        let connection = match connections.get(&connection_id) {
+            Some(conn) => conn,
+            None => return Err("SFTP连接不存在".to_string()),
+        };
+        connection.session.clone()
+    };
+    
+    println!("获取文件元数据: {}", path);
+    
+    match session.metadata(&path).await {
+        Ok(metadata) => {
+            // 从路径中提取文件名
+            let name = path.split('/').last().unwrap_or(&path).to_string();
+            
+            let file_info = SftpFileInfo {
+                name,
+                is_dir: metadata.is_dir(),
+                size: metadata.len(),
+                modified: metadata.modified().ok().and_then(|t| 
+                    t.duration_since(std::time::UNIX_EPOCH).ok()
+                ).map(|d| d.as_secs()),
+                permissions: {
+                    let perms = metadata.permissions();
+                    let mut perm_str = String::new();
+                    perm_str.push_str("---");
+                    perm_str.push(if perms.group_read { 'r' } else { '-' });
+                    perm_str.push(if perms.group_write { 'w' } else { '-' });
+                    perm_str.push(if perms.group_exec { 'x' } else { '-' });
+                    perm_str.push(if perms.other_read { 'r' } else { '-' });
+                    perm_str.push(if perms.other_write { 'w' } else { '-' });
+                    perm_str.push(if perms.other_exec { 'x' } else { '-' });
+                    perm_str
+                },
+            };
+            Ok(file_info)
+        },
+        Err(e) => Err(format!("获取文件元数据失败: {}", e)),
+    }
 }
