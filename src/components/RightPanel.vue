@@ -18,7 +18,6 @@
       
       <!-- 系统监控内容 -->
       <div class="panel-content monitor-content" v-if="activeTab === 'monitor'">
-      <a-spin :spinning="loading">
         <!-- 系统基本信息 -->
         <div class="info-section">
           <div class="section-header">
@@ -194,7 +193,6 @@
             </div>
           </div>
         </div>
-      </a-spin>
     </div>
     
     <!-- 下载管理内容 -->
@@ -286,18 +284,6 @@
         </a-button>
       </div>
     </div>
-    
-    <!-- 底部状态栏 - 仅监控页显示 -->
-    <div class="panel-footer" v-if="activeTab === 'monitor'">
-      <a-button size="small" @click="manualRefresh" :loading="loading">
-        <ReloadOutlined />
-        刷新
-      </a-button>
-      <span class="last-update" :class="{ updating: silentLoading }">
-        <span v-if="silentLoading" class="update-indicator">●</span>
-        {{ lastUpdate ? new Date(lastUpdate).toLocaleTimeString() : '-' }}
-      </span>
-    </div>
     </div>
     
     <!-- 按钮栏 - 始终显示，在最右侧 -->
@@ -330,7 +316,6 @@
 <script setup>
 import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { 
-  ReloadOutlined,
   DesktopOutlined,
   LaptopOutlined,
   WindowsOutlined,
@@ -359,15 +344,16 @@ const props = defineProps({
   connectionId: {
     type: String,
     default: ''
+  },
+  sshProfile: {
+    type: Object,
+    default: null
   }
 })
 
 const emit = defineEmits(['toggle'])
 
 // 状态数据
-const loading = ref(false)
-const silentLoading = ref(false) // 静默加载状态
-const lastUpdate = ref(null)
 const systemInfo = ref({})
 const cpuInfo = ref({})
 const memoryInfo = ref({})
@@ -402,57 +388,104 @@ function handleTabClick(tab) {
 
 let refreshTimer = null
 let refreshInterval = 3000 // 初始刷新间隔3秒
-const minInterval = 2000 // 最小间隔2秒
+const minInterval = 3000 // 最小间隔3秒
 const maxInterval = 30000 // 最大间隔30秒
 let errorCount = 0
 
-// 监控数据刷新
-async function refreshData(silent = false) {
-  if (!props.connectionId) return
+// 存储监控连接的配置信息
+let monitoringProfile = null
+let monitoringConnectionEstablished = false
+
+// 确保监控SSH连接已建立
+async function ensureMonitoringConnection() {
+  if (!props.connectionId) {
+    console.warn('connectionId为空，无法建立监控连接')
+    return false
+  }
   
-  if (silent) {
-    silentLoading.value = true
-  } else {
-    loading.value = true
+  // 如果连接已经建立，直接返回
+  if (monitoringConnectionEstablished) {
+    return true
   }
   
   try {
-    // 并行获取所有系统信息
-    const [system, cpu, memory, disk, network] = await Promise.all([
-      invoke('get_system_info', { connectionId: props.connectionId }),
-      invoke('get_cpu_info', { connectionId: props.connectionId }),
-      invoke('get_memory_info', { connectionId: props.connectionId }),
-      invoke('get_disk_info', { connectionId: props.connectionId }),
-      invoke('get_network_info', { connectionId: props.connectionId })
-    ])
+    // 使用传入的profile信息（从App.vue传递）
+    if (!props.sshProfile) {
+      console.error('未收到SSH配置信息')
+      return false
+    }
     
-    systemInfo.value = system
-    cpuInfo.value = cpu
-    memoryInfo.value = memory
-    diskInfo.value = disk
-    networkInfo.value = network
+    // 获取密码
+    let password = null
+    if (props.sshProfile.save_password) {
+      try {
+        password = await invoke('get_ssh_password', { id: props.sshProfile.id })
+      } catch (pwdError) {
+        console.error('获取SSH密码失败:', pwdError)
+        return false
+      }
+    }
     
-    lastUpdate.value = Date.now()
+    // 建立或复用监控连接
+    await invoke('connect_ssh_for_monitoring', {
+      connectionId: props.connectionId,
+      host: props.sshProfile.host,
+      port: props.sshProfile.port,
+      username: props.sshProfile.username,
+      password: password
+    })
+    
+    // 保存配置信息以便后续使用
+    monitoringProfile = props.sshProfile
+    monitoringConnectionEstablished = true
+    console.log('✓ 监控SSH连接已建立/复用')
+    return true
+    
+  } catch (error) {
+    console.error('建立监控SSH连接失败:', error)
+    monitoringConnectionEstablished = false
+    return false
+  }
+}
+
+// 监控数据刷新
+async function refreshData() {
+  if (!props.connectionId) return
+  
+  const startTime = Date.now()
+  
+  try {
+    // 确保监控连接已建立
+    const connected = await ensureMonitoringConnection()
+    if (!connected) {
+      throw new Error('无法建立监控SSH连接')
+    }
+    
+    // 使用批量命令一次性获取所有系统信息，大幅减少SSH请求次数
+    const batchInfo = await invoke('get_all_system_info_batch', { connectionId: props.connectionId })
+    
+    // 更新所有数据
+    if (batchInfo.system.hostname) systemInfo.value = batchInfo.system
+    if (batchInfo.cpu.usage !== undefined) cpuInfo.value = batchInfo.cpu
+    if (batchInfo.memory.total) memoryInfo.value = batchInfo.memory
+    if (batchInfo.disk.length > 0) diskInfo.value = batchInfo.disk
+    if (batchInfo.network.length > 0) networkInfo.value = batchInfo.network
+    
     errorCount = 0 // 重置错误计数
     
-    // 成功后适当减少刷新间隔（更频繁）
-    refreshInterval = Math.max(minInterval, refreshInterval * 0.9)
+    // 成功后减少刷新间隔（更频繁），但不低于最小值
+    refreshInterval = Math.max(minInterval, refreshInterval * 0.95)
+    
+    const elapsed = Date.now() - startTime
+    console.log(`系统监控刷新完成，耗时: ${elapsed}ms，下次刷新间隔: ${refreshInterval}ms`)
     
   } catch (error) {
     console.error('获取系统信息失败:', error)
     errorCount++
-    
-    // 只在非静默模式下显示错误消息
-    if (!silent) {
-      message.error('获取系统信息失败: ' + error)
-    }
+    message.error('获取系统信息失败: ' + error)
     
     // 错误时增加刷新间隔（降低频率）
-    refreshInterval = Math.min(maxInterval, refreshInterval * 1.5)
-    
-  } finally {
-    loading.value = false
-    silentLoading.value = false
+    refreshInterval = Math.min(maxInterval, refreshInterval * 2.0)
   }
 }
 
@@ -463,8 +496,11 @@ function startAutoRefresh() {
   function scheduleNext() {
     refreshTimer = setTimeout(async () => {
       if (!props.collapsed && props.connectionId) {
-        await refreshData(true) // 静默刷新
-        scheduleNext() // 递归调度下一次刷新
+        await refreshData()
+        // 只有在刷新成功后才会继续调度下一次
+        if (!props.collapsed && props.connectionId) {
+          scheduleNext() // 递归调度下一次刷新
+        }
       }
     }, refreshInterval)
   }
@@ -472,17 +508,20 @@ function startAutoRefresh() {
   scheduleNext()
 }
 
-// 手动刷新（带loading）
-async function manualRefresh() {
-  await refreshData(false)
-  // 手动刷新后重置间隔
-  refreshInterval = 3000
-}
-
 function stopAutoRefresh() {
   if (refreshTimer) {
     clearTimeout(refreshTimer)
     refreshTimer = null
+  }
+  
+  // 断开监控连接
+  if (props.connectionId && monitoringConnectionEstablished) {
+    invoke('disconnect_ssh_monitoring', { connectionId: props.connectionId })
+      .then(() => {
+        monitoringConnectionEstablished = false
+        console.log('✓ 监控SSH连接已断开')
+      })
+      .catch(err => console.error('断开监控连接失败:', err))
   }
 }
 
@@ -547,7 +586,6 @@ onUnmounted(() => {
 watch(() => props.collapsed, (newCollapsed) => {
   if (!newCollapsed && props.connectionId) {
     // 展开时才开始刷新数据
-    manualRefresh() // 首次手动刷新，带loading
     startAutoRefresh()
   } else {
     // 折叠时停止刷新
@@ -558,7 +596,6 @@ watch(() => props.collapsed, (newCollapsed) => {
 watch(() => props.connectionId, (newConnectionId) => {
   if (newConnectionId && !props.collapsed) {
     // 只有在面板展开且有连接时才刷新
-    manualRefresh() // 首次手动刷新，带loading
     startAutoRefresh()
   } else {
     // 没有连接或面板折叠时停止刷新
@@ -761,41 +798,6 @@ defineExpose({
 .monitor-content {
   flex: 1;
   min-height: 0;
-}
-
-.panel-footer {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 16px;
-  background: var(--panel-header-bg);
-  border-top: 1px solid var(--border-color);
-  font-size: 12px;
-}
-
-.last-update {
-  color: var(--muted-color);
-  transition: color 0.3s ease;
-}
-
-.last-update.updating {
-  color: var(--primary-color);
-}
-
-.update-indicator {
-  display: inline-block;
-  color: var(--primary-color);
-  margin-right: 4px;
-  animation: pulse 1.5s ease-in-out infinite;
-}
-
-@keyframes pulse {
-  0%, 100% {
-    opacity: 0.4;
-  }
-  50% {
-    opacity: 1;
-  }
 }
 
 .info-section {

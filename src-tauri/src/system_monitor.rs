@@ -4,6 +4,27 @@ use std::sync::{Arc, Mutex};
 use tauri::command;
 use crate::ssh_command;
 
+// 批量获取系统信息的结构体
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BatchSystemInfo {
+    pub system: SystemInfo,
+    pub cpu: CpuInfo,
+    pub memory: MemoryInfo,
+    pub disk: Vec<DiskInfo>,
+    pub network: Vec<NetworkInterface>,
+    pub process: ProcessInfo,
+}
+
+// 动态数据批量获取结构（不包含静态数据）
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DynamicSystemInfo {
+    pub cpu: CpuInfo,
+    pub memory: MemoryInfo,
+    pub disk: Vec<DiskInfo>,
+    pub network: Vec<NetworkInterface>,
+    pub process: ProcessInfo,
+}
+
 // SSH命令执行辅助函数
 async fn execute_ssh_command(connection_id: &str, command: &str) -> Result<String, String> {
     // 使用真正的SSH命令执行
@@ -17,6 +38,7 @@ pub struct SystemInfo {
     pub arch: String,
     pub kernel: String,
     pub uptime: u64,
+    pub boot_time: u64, // 系统启动时间戳（用于前端本地计算运行时间）
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -77,62 +99,7 @@ pub struct ProcessInfo {
     pub sleeping: u32,
 }
 
-// 系统信息获取命令（通过SSH执行）
-#[command]
-pub async fn get_system_info(connection_id: String) -> Result<SystemInfo, String> {
-    // 通过SSH连接执行系统命令获取真实数据
-    let hostname = execute_ssh_command(&connection_id, "hostname").await
-        .unwrap_or_else(|_| "unknown".to_string());
-    
-    let os_info = execute_ssh_command(&connection_id, "cat /etc/os-release | grep PRETTY_NAME | cut -d'\"' -f2").await
-        .unwrap_or_else(|_| "Unknown OS".to_string());
-    
-    let arch = execute_ssh_command(&connection_id, "uname -m").await
-        .unwrap_or_else(|_| "unknown".to_string());
-    
-    let kernel = execute_ssh_command(&connection_id, "uname -r").await
-        .unwrap_or_else(|_| "unknown".to_string());
-    
-    let uptime_str = execute_ssh_command(&connection_id, "cat /proc/uptime | cut -d' ' -f1").await
-        .unwrap_or_else(|_| "0".to_string());
-    
-    let uptime = uptime_str.trim().parse::<f64>().unwrap_or(0.0) as u64;
-    
-    Ok(SystemInfo {
-        hostname: hostname.trim().to_string(),
-        os: os_info.trim().to_string(),
-        arch: arch.trim().to_string(),
-        kernel: kernel.trim().to_string(),
-        uptime,
-    })
-}
-
-#[command]
-pub async fn get_cpu_info(connection_id: String) -> Result<CpuInfo, String> {
-    // 获取CPU模型
-    let model = execute_ssh_command(&connection_id, "cat /proc/cpuinfo | grep 'model name' | head -n1 | cut -d':' -f2").await
-        .unwrap_or_else(|_| "Unknown CPU".to_string());
-    
-    // 获取CPU使用率
-    let cpu_stat = execute_ssh_command(&connection_id, "cat /proc/stat | head -n1").await
-        .unwrap_or_else(|_| "cpu 0 0 0 0 0 0 0 0 0 0".to_string());
-    
-    // 解析CPU使用率
-    let usage = parse_cpu_usage(&cpu_stat);
-    
-    // 获取核心数并生成每核心使用率（简单变化）
-    let cores = (0..8).map(|i| {
-        let variation = (i as f64 * 7.3) % 20.0 - 10.0; // 简单的伪随机变化
-        (usage + variation).max(0.0).min(100.0)
-    }).collect();
-    
-    Ok(CpuInfo {
-        model: model.trim().to_string(),
-        usage,
-        cores,
-    })
-}
-
+// 解析CPU使用率
 fn parse_cpu_usage(cpu_stat: &str) -> f64 {
     let parts: Vec<&str> = cpu_stat.split_whitespace().collect();
     if parts.len() < 5 {
@@ -152,78 +119,6 @@ fn parse_cpu_usage(cpu_stat: &str) -> f64 {
     } else {
         0.0
     }
-}
-
-#[command]
-pub async fn get_memory_info(connection_id: String) -> Result<MemoryInfo, String> {
-    // 获取内存总量
-    let total_str = execute_ssh_command(&connection_id, "cat /proc/meminfo | grep MemTotal | awk '{print $2}'").await
-        .unwrap_or_else(|_| "16777216".to_string());
-    
-    // 获取可用内存
-    let available_str = execute_ssh_command(&connection_id, "cat /proc/meminfo | grep MemAvailable | awk '{print $2}'").await
-        .unwrap_or_else(|_| "8388608".to_string());
-    
-    // 获取缓存
-    let cached_str = execute_ssh_command(&connection_id, "cat /proc/meminfo | grep '^Cached:' | awk '{print $2}'").await
-        .unwrap_or_else(|_| "2097152".to_string());
-    
-    let total = total_str.trim().parse::<u64>().unwrap_or(16777216) * 1024; // KB to bytes
-    let available = available_str.trim().parse::<u64>().unwrap_or(8388608) * 1024;
-    let cached = cached_str.trim().parse::<u64>().unwrap_or(2097152) * 1024;
-    let used = total - available;
-    
-    Ok(MemoryInfo {
-        total,
-        used,
-        available,
-        cached,
-        usage: (used as f64 / total as f64) * 100.0,
-    })
-}
-
-#[command]
-pub async fn get_disk_info(connection_id: String) -> Result<Vec<DiskInfo>, String> {
-    // 获取磁盘使用信息
-    let df_output = execute_ssh_command(&connection_id, "df -h --output=source,fstype,size,used,avail,pcent,target | grep -E '^/dev/'").await
-        .unwrap_or_else(|_| "/dev/sda1 ext4 500G 375G 100G 79% /".to_string());
-    
-    let mut disks = Vec::new();
-    
-    for line in df_output.lines() {
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() >= 7 {
-            let device = parts[0].to_string();
-            let filesystem = parts[1].to_string();
-            let total = parse_size(parts[2]);
-            let used = parse_size(parts[3]);
-            let mountpoint = parts[6].to_string();
-            let usage = parts[5].trim_end_matches('%').parse::<f64>().unwrap_or(0.0);
-            
-            disks.push(DiskInfo {
-                device,
-                filesystem,
-                total,
-                used,
-                mountpoint,
-                usage,
-            });
-        }
-    }
-    
-    // 如果没有解析到磁盘信息，返回默认值
-    if disks.is_empty() {
-        disks.push(DiskInfo {
-            device: "/dev/sda1".to_string(),
-            filesystem: "ext4".to_string(),
-            total: 500 * 1024 * 1024 * 1024, // 500GB
-            used: 375 * 1024 * 1024 * 1024,  // 375GB
-            mountpoint: "/".to_string(),
-            usage: 75.0,
-        });
-    }
-    
-    Ok(disks)
 }
 
 // 计算网络速度
@@ -287,16 +182,199 @@ fn parse_size(size_str: &str) -> u64 {
     }
 }
 
+// 批量获取所有系统信息（优化：单次SSH执行获取所有数据）
 #[command]
-pub async fn get_network_info(connection_id: String) -> Result<Vec<NetworkInterface>, String> {
-    // 获取网络接口信息
-    let net_dev = execute_ssh_command(&connection_id, "cat /proc/net/dev | tail -n +3").await
-        .unwrap_or_else(|_| "eth0: 5368709120 0 0 0 0 0 0 0 3221225472 0 0 0 0 0 0 0".to_string());
+pub async fn get_all_system_info_batch(connection_id: String) -> Result<BatchSystemInfo, String> {
+    // 构建一个批量命令，一次性获取所有需要的系统信息
+    let batch_command = r#"
+# 输出分隔符
+echo "===SYSTEM_INFO==="
+hostname
+cat /etc/os-release | grep PRETTY_NAME | cut -d'"' -f2
+uname -m
+uname -r
+cat /proc/uptime | cut -d' ' -f1
+
+echo "===CPU_INFO==="
+cat /proc/cpuinfo | grep 'model name' | head -n1 | cut -d':' -f2
+cat /proc/stat | head -n1
+
+echo "===MEMORY_INFO==="
+cat /proc/meminfo | grep MemTotal | awk '{print $2}'
+cat /proc/meminfo | grep MemAvailable | awk '{print $2}'
+cat /proc/meminfo | grep '^Cached:' | awk '{print $2}'
+
+echo "===DISK_INFO==="
+df -h --output=source,fstype,size,used,avail,pcent,target | grep -E '^/dev/'
+
+echo "===NETWORK_INFO==="
+cat /proc/net/dev | tail -n +3
+
+echo "===PROCESS_INFO==="
+ps axo stat --no-headers | sort | uniq -c
+"#;
     
+    let output = execute_ssh_command(&connection_id, batch_command).await?;
     
+    // 解析批量输出
+    let mut sections: HashMap<&str, String> = HashMap::new();
+    let mut current_section = "";
+    let mut current_content = String::new();
+    
+    for line in output.lines() {
+        if line.starts_with("===") && line.ends_with("===") {
+            // 保存前一个section
+            if !current_section.is_empty() {
+                sections.insert(current_section, current_content.clone());
+                current_content.clear();
+            }
+            // 开始新section
+            current_section = line.trim_matches('=');
+        } else if !current_section.is_empty() {
+            current_content.push_str(line);
+            current_content.push('\n');
+        }
+    }
+    
+    // 保存最后一个section
+    if !current_section.is_empty() {
+        sections.insert(current_section, current_content);
+    }
+    
+    // 解析各个section
+    let system = parse_system_info(sections.get("SYSTEM_INFO").unwrap_or(&String::new()));
+    let cpu = parse_cpu_info(sections.get("CPU_INFO").unwrap_or(&String::new()));
+    let memory = parse_memory_info(sections.get("MEMORY_INFO").unwrap_or(&String::new()));
+    let disk = parse_disk_info(sections.get("DISK_INFO").unwrap_or(&String::new()));
+    let network = parse_network_info_batch(&connection_id, sections.get("NETWORK_INFO").unwrap_or(&String::new())).await?;
+    let process = parse_process_info(sections.get("PROCESS_INFO").unwrap_or(&String::new()));
+    
+    Ok(BatchSystemInfo {
+        system,
+        cpu,
+        memory,
+        disk,
+        network,
+        process,
+    })
+}
+
+// 解析系统信息
+fn parse_system_info(content: &str) -> SystemInfo {
+    let lines: Vec<&str> = content.lines().collect();
+    let uptime = lines.get(4)
+        .and_then(|s| s.trim().parse::<f64>().ok())
+        .unwrap_or(0.0) as u64;
+    
+    // 计算启动时间：当前时间 - 运行时间
+    let boot_time = (std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as f64 - uptime as f64) as u64;
+    
+    SystemInfo {
+        hostname: lines.get(0).map(|s| s.trim().to_string()).unwrap_or_default(),
+        os: lines.get(1).map(|s| s.trim().to_string()).unwrap_or_else(|| "Unknown OS".to_string()),
+        arch: lines.get(2).map(|s| s.trim().to_string()).unwrap_or_default(),
+        kernel: lines.get(3).map(|s| s.trim().to_string()).unwrap_or_default(),
+        uptime,
+        boot_time,
+    }
+}
+
+// 解析CPU信息
+fn parse_cpu_info(content: &str) -> CpuInfo {
+    let lines: Vec<&str> = content.lines().collect();
+    let model = lines.get(0)
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| "Unknown CPU".to_string());
+    
+    let usage = lines.get(1)
+        .map(|s| parse_cpu_usage(s))
+        .unwrap_or(0.0);
+    
+    // 生成核心使用率
+    let cores = (0..8).map(|i| {
+        let variation = (i as f64 * 7.3) % 20.0 - 10.0;
+        (usage + variation).max(0.0).min(100.0)
+    }).collect();
+    
+    CpuInfo {
+        model,
+        usage,
+        cores,
+    }
+}
+
+// 解析内存信息
+fn parse_memory_info(content: &str) -> MemoryInfo {
+    let lines: Vec<&str> = content.lines().collect();
+    let total = lines.get(0)
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .unwrap_or(16777216) * 1024;
+    let available = lines.get(1)
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .unwrap_or(8388608) * 1024;
+    let cached = lines.get(2)
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .unwrap_or(2097152) * 1024;
+    let used = total - available;
+    
+    MemoryInfo {
+        total,
+        used,
+        available,
+        cached,
+        usage: (used as f64 / total as f64) * 100.0,
+    }
+}
+
+// 解析磁盘信息
+fn parse_disk_info(content: &str) -> Vec<DiskInfo> {
+    let mut disks = Vec::new();
+    
+    for line in content.lines() {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() >= 7 {
+            let device = parts[0].to_string();
+            let filesystem = parts[1].to_string();
+            let total = parse_size(parts[2]);
+            let used = parse_size(parts[3]);
+            let mountpoint = parts[6].to_string();
+            let usage = parts[5].trim_end_matches('%').parse::<f64>().unwrap_or(0.0);
+            
+            disks.push(DiskInfo {
+                device,
+                filesystem,
+                total,
+                used,
+                mountpoint,
+                usage,
+            });
+        }
+    }
+    
+    if disks.is_empty() {
+        disks.push(DiskInfo {
+            device: "/dev/sda1".to_string(),
+            filesystem: "ext4".to_string(),
+            total: 500 * 1024 * 1024 * 1024,
+            used: 375 * 1024 * 1024 * 1024,
+            mountpoint: "/".to_string(),
+            usage: 75.0,
+        });
+    }
+    
+    disks
+}
+
+// 批量解析网络信息（需要额外获取IP地址）
+async fn parse_network_info_batch(connection_id: &str, content: &str) -> Result<Vec<NetworkInterface>, String> {
     let mut interfaces = Vec::new();
+    let mut interface_stats: HashMap<String, (u64, u64)> = HashMap::new();
     
-    for line in net_dev.lines() {
+    // 第一遍：收集网络统计数据
+    for line in content.lines() {
         if let Some(colon_pos) = line.find(':') {
             let interface_name = line[..colon_pos].trim().to_string();
             let stats: Vec<&str> = line[colon_pos + 1..].split_whitespace().collect();
@@ -304,43 +382,71 @@ pub async fn get_network_info(connection_id: String) -> Result<Vec<NetworkInterf
             if stats.len() >= 9 {
                 let rx_bytes: u64 = stats[0].parse().unwrap_or(0);
                 let tx_bytes: u64 = stats[8].parse().unwrap_or(0);
-                
-                // 获取接口状态和IP
-                let ip_info = execute_ssh_command(&connection_id, &format!("ip addr show {} | grep 'inet ' | awk '{{print $2}}' | cut -d'/' -f1", interface_name)).await
-                    .ok()
-                    .and_then(|ip| if ip.trim().is_empty() { None } else { Some(ip.trim().to_string()) });
-                
-                let status = if interface_name == "lo" || rx_bytes > 0 || tx_bytes > 0 {
-                    "up".to_string()
-                } else {
-                    "down".to_string()
-                };
-                
-                // 计算网络速度
-                let (rx_speed, tx_speed) = calculate_network_speed(&interface_name, rx_bytes, tx_bytes);
-                
-                
-                interfaces.push(NetworkInterface {
-                    name: interface_name,
-                    status,
-                    ip: ip_info,
-                    rx_bytes,
-                    tx_bytes,
-                    rx_speed,
-                    tx_speed,
-                });
+                interface_stats.insert(interface_name.clone(), (rx_bytes, tx_bytes));
             }
         }
     }
     
-    // 如果没有解析到网络接口，返回默认值
+    // 第二遍：获取IP地址并构建接口信息
+    let mut ip_commands = Vec::new();
+    for interface_name in interface_stats.keys() {
+        if interface_name != "lo" { // 跳过loopback
+            ip_commands.push(format!("ip addr show {} | grep 'inet ' | awk '{{print $2}}' | cut -d'/' -f1", interface_name));
+        }
+    }
+    
+    // 批量获取IP地址
+    let ip_query = if ip_commands.is_empty() {
+        String::new()
+    } else {
+        ip_commands.join("\n")
+    };
+    
+    let ip_outputs: Vec<String> = if ip_query.is_empty() {
+        Vec::new()
+    } else {
+        match execute_ssh_command(connection_id, &ip_query).await {
+            Ok(output) => output.lines().map(|s| s.trim().to_string()).collect(),
+            Err(_) => vec![String::new(); ip_commands.len()],
+        }
+    };
+    
+    let mut ip_iter = ip_outputs.iter();
+    
+    for (interface_name, (rx_bytes, tx_bytes)) in &interface_stats {
+        let ip = if interface_name == "lo" {
+            None
+        } else {
+            let ip_str = ip_iter.next().map(|s| s.as_str()).unwrap_or("");
+            if ip_str.is_empty() { None } else { Some(ip_str.to_string()) }
+        };
+        
+        let status = if interface_name == "lo" || *rx_bytes > 0 || *tx_bytes > 0 {
+            "up".to_string()
+        } else {
+            "down".to_string()
+        };
+        
+        let (rx_speed, tx_speed) = calculate_network_speed(interface_name, *rx_bytes, *tx_bytes);
+        
+        interfaces.push(NetworkInterface {
+            name: interface_name.clone(),
+            status,
+            ip,
+            rx_bytes: *rx_bytes,
+            tx_bytes: *tx_bytes,
+            rx_speed,
+            tx_speed,
+        });
+    }
+    
     if interfaces.is_empty() {
         interfaces.push(NetworkInterface {
             name: "eth0".to_string(),
             status: "up".to_string(),
             ip: Some("192.168.1.100".to_string()),
-            rx_bytes: 5 * 1024 * 1024 * 1024, // 5GB
-            tx_bytes: 3 * 1024 * 1024 * 1024, // 3GB
+            rx_bytes: 5 * 1024 * 1024 * 1024,
+            tx_bytes: 3 * 1024 * 1024 * 1024,
             rx_speed: 0.0,
             tx_speed: 0.0,
         });
@@ -349,17 +455,13 @@ pub async fn get_network_info(connection_id: String) -> Result<Vec<NetworkInterf
     Ok(interfaces)
 }
 
-#[command]
-pub async fn get_process_info(connection_id: String) -> Result<ProcessInfo, String> {
-    // 获取进程统计信息
-    let ps_output = execute_ssh_command(&connection_id, "ps axo stat --no-headers | sort | uniq -c").await
-        .unwrap_or_else(|_| "   12 R\n  233 S\n".to_string());
-    
+// 解析进程信息
+fn parse_process_info(content: &str) -> ProcessInfo {
     let mut total = 0;
     let mut running = 0;
     let mut sleeping = 0;
     
-    for line in ps_output.lines() {
+    for line in content.lines() {
         let parts: Vec<&str> = line.trim().split_whitespace().collect();
         if parts.len() >= 2 {
             let count: u32 = parts[0].parse().unwrap_or(0);
@@ -374,16 +476,96 @@ pub async fn get_process_info(connection_id: String) -> Result<ProcessInfo, Stri
         }
     }
     
-    // 如果没有解析到进程信息，返回默认值
     if total == 0 {
         total = 245;
         running = 12;
         sleeping = 233;
     }
     
-    Ok(ProcessInfo {
+    ProcessInfo {
         total,
         running,
         sleeping,
+    }
+}
+
+// 批量获取动态系统信息（只获取CPU、内存、磁盘、网络等动态数据）
+#[command]
+pub async fn get_dynamic_system_info_batch(connection_id: String) -> Result<DynamicSystemInfo, String> {
+    // 构建批量命令，只获取动态数据
+    let batch_command = r#"
+# 输出分隔符
+echo "===CPU_INFO==="
+cat /proc/stat | head -n1
+
+echo "===MEMORY_INFO==="
+cat /proc/meminfo | grep MemTotal | awk '{print $2}'
+cat /proc/meminfo | grep MemAvailable | awk '{print $2}'
+cat /proc/meminfo | grep '^Cached:' | awk '{print $2}'
+
+echo "===DISK_INFO==="
+df -h --output=source,fstype,size,used,avail,pcent,target | grep -E '^/dev/'
+
+echo "===NETWORK_INFO==="
+cat /proc/net/dev | tail -n +3
+
+echo "===PROCESS_INFO==="
+ps axo stat --no-headers | sort | uniq -c
+"#;
+    
+    let output = execute_ssh_command(&connection_id, batch_command).await?;
+    
+    // 解析批量输出
+    let mut sections: HashMap<&str, String> = HashMap::new();
+    let mut current_section = "";
+    let mut current_content = String::new();
+    
+    for line in output.lines() {
+        if line.starts_with("===") && line.ends_with("===") {
+            // 保存前一个section
+            if !current_section.is_empty() {
+                sections.insert(current_section, current_content.clone());
+                current_content.clear();
+            }
+            // 开始新section
+            current_section = line.trim_matches('=');
+        } else if !current_section.is_empty() {
+            current_content.push_str(line);
+            current_content.push('\n');
+        }
+    }
+    
+    // 保存最后一个section
+    if !current_section.is_empty() {
+        sections.insert(current_section, current_content);
+    }
+    
+    // 解析各个section
+    // 注意：CPU模型信息需要从静态数据中获取，这里不获取
+    let cpu_section = sections.get("CPU_INFO").map(|s| s.as_str()).unwrap_or("");
+    let cpu_stat = cpu_section.lines().next().unwrap_or("");
+    let cpu_usage = parse_cpu_usage(cpu_stat);
+    
+    // CPU模型使用空字符串，需要从首次获取的静态数据中获取
+    let cpu = CpuInfo {
+        model: String::new(), // 需要从静态数据中获取
+        usage: cpu_usage,
+        cores: (0..8).map(|i| {
+            let variation = (i as f64 * 7.3) % 20.0 - 10.0;
+            (cpu_usage + variation).max(0.0).min(100.0)
+        }).collect(),
+    };
+    
+    let memory = parse_memory_info(sections.get("MEMORY_INFO").unwrap_or(&String::new()));
+    let disk = parse_disk_info(sections.get("DISK_INFO").unwrap_or(&String::new()));
+    let network = parse_network_info_batch(&connection_id, sections.get("NETWORK_INFO").unwrap_or(&String::new())).await?;
+    let process = parse_process_info(sections.get("PROCESS_INFO").unwrap_or(&String::new()));
+    
+    Ok(DynamicSystemInfo {
+        cpu,
+        memory,
+        disk,
+        network,
+        process,
     })
 }

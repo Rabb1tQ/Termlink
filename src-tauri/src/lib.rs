@@ -63,12 +63,8 @@ pub fn run() {
       sftp_russh::get_sftp_file_metadata,
       
       // System monitor commands
-      system_monitor::get_system_info,
-      system_monitor::get_cpu_info,
-      system_monitor::get_memory_info,
-      system_monitor::get_disk_info,
-      system_monitor::get_network_info,
-      system_monitor::get_process_info,
+      system_monitor::get_all_system_info_batch,
+      system_monitor::get_dynamic_system_info_batch,
       
       // Download manager commands
       download_manager::select_download_location,

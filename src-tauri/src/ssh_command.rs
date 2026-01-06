@@ -30,12 +30,7 @@ impl client::Handler for Client {
 // 执行SSH命令
 #[command]
 pub async fn execute_ssh_command(connection_id: String, command: String) -> Result<String, String> {
-    // 优先尝试通过SSH Terminal执行命令（如果存在活跃的终端连接）
-    if let Ok(result) = ssh_terminal_russh::execute_command_via_terminal(&connection_id, command.clone()).await {
-        return Ok(result);
-    }
-    
-    // 回退到使用SSH Command模块的会话池
+    // 优先使用独立的SSH监控连接池（避免影响Terminal session）
     let session_handle = {
         let sessions = SSH_SESSIONS.lock().await;
         sessions.get(&connection_id).cloned()
@@ -105,7 +100,18 @@ pub async fn connect_ssh_for_monitoring(
     username: String,
     password: Option<String>
 ) -> Result<(), String> {
-    println!("为系统监控创建SSH连接: {}@{}:{}", username, host, port);
+    println!("为系统监控创建/检查SSH连接: {}@{}:{}", username, host, port);
+    
+    // 检查是否已存在连接
+    let exists = {
+        let sessions = SSH_SESSIONS.lock().await;
+        sessions.contains_key(&connection_id)
+    };
+    
+    if exists {
+        println!("✓ SSH监控连接已存在，复用连接");
+        return Ok(());
+    }
     
     // 创建客户端配置
     let config = client::Config {

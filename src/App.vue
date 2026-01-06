@@ -84,6 +84,7 @@
         :collapsed="rightPanelCollapsed" 
         @toggle="rightPanelCollapsed = !rightPanelCollapsed"
         :connection-id="getActiveTab()?.type === 'ssh' ? getActiveTab()?.id : ''"
+        :ssh-profile="getActiveTab()?.type === 'ssh' ? getActiveTab()?.profile : null"
       />
     </div>
     

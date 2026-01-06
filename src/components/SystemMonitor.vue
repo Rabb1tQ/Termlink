@@ -201,39 +201,65 @@ const emit = defineEmits(['close'])
 // 状态数据
 const loading = ref(false)
 const lastUpdate = ref(null)
-const systemInfo = ref({})
-const cpuInfo = ref({})
+const systemInfo = ref({}) // 静态系统信息（hostname, os, arch, kernel, boot_time）
+const cpuInfo = ref({}) // 包含静态的 model 和动态的 usage、cores
 const memoryInfo = ref({})
 const diskInfo = ref([])
 const networkInfo = ref([])
 const processInfo = ref({})
 
+// 标记是否已获取过首次数据
+const isFirstFetch = ref(true)
+
 let refreshTimer = null
 let refreshDebounceTimer = null
 
-// 监控数据刷新
+// 本地计算运行时间
+function calculateLocalUptime(bootTime) {
+  if (!bootTime) return 0
+  const now = Math.floor(Date.now() / 1000) // 当前时间戳（秒）
+  return Math.max(0, now - bootTime)
+}
+
+// 监控数据刷新（优化：首次全量，后续增量）
 async function refreshData() {
   if (!props.connectionId) return
   
   loading.value = true
   try {
-    // 并行获取所有系统信息
-    const [system, cpu, memory, disk, network, process] = await Promise.all([
-      invoke('get_system_info', { connectionId: props.connectionId }),
-      invoke('get_cpu_info', { connectionId: props.connectionId }),
-      invoke('get_memory_info', { connectionId: props.connectionId }),
-      invoke('get_disk_info', { connectionId: props.connectionId }),
-      invoke('get_network_info', { connectionId: props.connectionId }),
-      invoke('get_process_info', { connectionId: props.connectionId })
-    ])
-    
-    systemInfo.value = system
-    cpuInfo.value = cpu
-    memoryInfo.value = memory
-    diskInfo.value = disk
-    console.log('Network data received:', network)
-    networkInfo.value = network
-    processInfo.value = process
+    if (isFirstFetch.value) {
+      // 首次获取：全量数据
+      const data = await invoke('get_all_system_info_batch', { 
+        connectionId: props.connectionId 
+      })
+      
+      systemInfo.value = data.system
+      cpuInfo.value = data.cpu
+      memoryInfo.value = data.memory
+      diskInfo.value = data.disk
+      networkInfo.value = data.network
+      processInfo.value = data.process
+      
+      isFirstFetch.value = false
+    } else {
+      // 后续获取：只有动态数据
+      const data = await invoke('get_dynamic_system_info_batch', { 
+        connectionId: props.connectionId 
+      })
+      
+      // 保留 CPU model（静态数据）
+      const cpuModel = cpuInfo.value.model || ''
+      
+      // 更新动态数据
+      cpuInfo.value = {
+        ...data.cpu,
+        model: cpuModel // 保留静态的 CPU 型号
+      }
+      memoryInfo.value = data.memory
+      diskInfo.value = data.disk
+      networkInfo.value = data.network
+      processInfo.value = data.process
+    }
     
     lastUpdate.value = Date.now()
   } catch (error) {
@@ -244,50 +270,37 @@ async function refreshData() {
   }
 }
 
-// 优化的数据刷新 - 分批获取，减少阻塞
-async function refreshDataOptimized() {
+// 静默刷新（不显示loading）
+async function refreshDataSilent() {
   if (!props.connectionId) return
   
-  // 不显示loading状态，避免UI闪烁
   try {
-    // 分批获取数据，避免一次性请求过多
-    const batch1 = await Promise.all([
-      invoke('get_system_info', { connectionId: props.connectionId }),
-      invoke('get_cpu_info', { connectionId: props.connectionId }),
-      invoke('get_memory_info', { connectionId: props.connectionId })
-    ])
+    // 只获取动态数据
+    const data = await invoke('get_dynamic_system_info_batch', { 
+      connectionId: props.connectionId 
+    })
     
-    // 更新第一批数据
-    systemInfo.value = batch1[0]
-    cpuInfo.value = batch1[1]
-    memoryInfo.value = batch1[2]
+    // 保留 CPU model（静态数据）
+    const cpuModel = cpuInfo.value.model || ''
     
-    // 短暂延迟后获取第二批数据
-    setTimeout(async () => {
-      try {
-        const batch2 = await Promise.all([
-          invoke('get_disk_info', { connectionId: props.connectionId }),
-          invoke('get_network_info', { connectionId: props.connectionId }),
-          invoke('get_process_info', { connectionId: props.connectionId })
-        ])
-        
-        diskInfo.value = batch2[0]
-        networkInfo.value = batch2[1]
-        processInfo.value = batch2[2]
-        
-        lastUpdate.value = Date.now()
-      } catch (error) {
-        console.error('获取第二批系统信息失败:', error)
-      }
-    }, 100) // 100ms延迟
+    // 更新动态数据
+    cpuInfo.value = {
+      ...data.cpu,
+      model: cpuModel
+    }
+    memoryInfo.value = data.memory
+    diskInfo.value = data.disk
+    networkInfo.value = data.network
+    processInfo.value = data.process
     
+    lastUpdate.value = Date.now()
   } catch (error) {
-    console.error('获取系统信息失败:', error)
+    console.error('静默刷新失败:', error)
     // 不显示错误消息，避免干扰用户
   }
 }
 
-// 自动刷新
+// 自动刷新（优化：首次全量，后续增量）
 function startAutoRefresh() {
   if (refreshTimer) {
     clearInterval(refreshTimer)
@@ -295,15 +308,15 @@ function startAutoRefresh() {
   
   refreshTimer = setInterval(() => {
     if (props.visible) {
-      // 使用防抖机制，避免频繁刷新
+      // 使用防抖机制
       if (refreshDebounceTimer) {
         clearTimeout(refreshDebounceTimer)
       }
       refreshDebounceTimer = setTimeout(() => {
-        refreshDataOptimized()
+        refreshDataSilent()
       }, 500) // 500ms防抖
     }
-  }, 10000) // 改为每10秒刷新一次，减少频率
+  }, 3000) // 改为每3秒刷新一次（因为已经优化了，可以更频繁）
 }
 
 function stopAutoRefresh() {
@@ -333,9 +346,20 @@ function formatNetworkSpeed(bytesPerSecond) {
   return Math.round(bytesPerSecond / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i]
 }
 
-// 格式化运行时间
-function formatUptime(seconds) {
-  if (!seconds) return '-'
+// 格式化运行时间（本地计算）
+function formatUptime(uptime) {
+  // 如果有 boot_time，使用本地计算
+  if (systemInfo.value.boot_time) {
+    const localUptime = calculateLocalUptime(systemInfo.value.boot_time)
+    return formatUptimeImpl(localUptime)
+  }
+  // 否则使用传入的 uptime
+  return formatUptimeImpl(uptime)
+}
+
+// 实际格式化函数
+function formatUptimeImpl(seconds) {
+  if (!seconds || seconds === 0) return '-'
   
   const days = Math.floor(seconds / 86400)
   const hours = Math.floor((seconds % 86400) / 3600)
@@ -363,6 +387,9 @@ const connectionId = computed(() => props.connectionId)
 
 // 生命周期
 onMounted(() => {
+  // 重置首次获取标记（每次打开面板都重新获取全量数据）
+  isFirstFetch.value = true
+  
   if (props.visible) {
     refreshData()
     startAutoRefresh()
@@ -376,6 +403,8 @@ onUnmounted(() => {
 // 监听属性变化
 watch(() => props.visible, (newVisible) => {
   if (newVisible) {
+    // 打开面板时重置首次获取标记
+    isFirstFetch.value = true
     refreshData()
     startAutoRefresh()
   } else {

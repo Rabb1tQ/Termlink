@@ -12,6 +12,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
+import { message } from 'ant-design-vue'
 import '@xterm/xterm/css/xterm.css'
 import SshService from '../services/SshService'
 
@@ -221,9 +222,19 @@ async function bindSession() {
     
     const offErrorP = listen(`ssh_error`, e => {
       if (e.payload.startsWith(`${props.id}: `)) {
+        const errorMsg = e.payload.substring(props.id.length + 2)
         if (terminal.value) {
-          terminal.value.writeln(`\r\n\x1b[31m${e.payload.substring(props.id.length + 2)}\x1b[0m`)
+          terminal.value.writeln(`\r\n\x1b[31m${errorMsg}\x1b[0m`)
         }
+        // 显示错误弹窗
+        message.error({
+          content: errorMsg,
+          duration: 8,
+          style: {
+            marginTop: '50px',
+            maxWidth: '400px'
+          }
+        })
       }
     })
     
