@@ -522,13 +522,33 @@ body[data-theme="light"] .xterm .xterm-selection-layer {
   color: #ffffff !important;
 }
 
-/* 全局文本选择样式 */
+/* 全局文本选择样式 - 默认样式（无data-theme时） */
+::selection {
+  background: #0078d4 !important;
+  color: #ffffff !important;
+}
+
+::-moz-selection {
+  background: #0078d4 !important;
+  color: #ffffff !important;
+}
+
 body[data-theme="dark"] ::selection {
   background: #264f78 !important;
   color: #ffffff !important;
 }
 
+body[data-theme="dark"] ::-moz-selection {
+  background: #264f78 !important;
+  color: #ffffff !important;
+}
+
 body[data-theme="light"] ::selection {
+  background: #0078d4 !important;
+  color: #ffffff !important;
+}
+
+body[data-theme="light"] ::-moz-selection {
   background: #0078d4 !important;
   color: #ffffff !important;
 }
@@ -610,16 +630,48 @@ body[data-theme="dark"] .xterm .xterm-rows .xterm-row span:not(.xterm-selection)
   color: #ffffff !important;
 }
 
+/* 强制覆盖xterm的选中文字样式 - 解决白色文字+白色背景问题 */
+body[data-theme="light"] .xterm .xterm-decoration-top,
+body[data-theme="light"] .xterm .xterm-decoration-bottom {
+  color: #ffffff !important;
+  background-color: #0078d4 !important;
+}
+
+body[data-theme="dark"] .xterm .xterm-decoration-top,
+body[data-theme="dark"] .xterm .xterm-decoration-bottom {
+  color: #ffffff !important;
+  background-color: #264f78 !important;
+}
+
+/* 强制覆盖所有xterm选择相关元素的样式 */
+body[data-theme="light"] .xterm .xterm-selection {
+  background-color: #0078d4 !important;
+  color: #ffffff !important;
+}
+
+body[data-theme="dark"] .xterm .xterm-selection {
+  background-color: #264f78 !important;
+  color: #ffffff !important;
+}
+
+body[data-theme="light"] .xterm .xterm-selection-layer {
+  background-color: #0078d4 !important;
+}
+
+body[data-theme="dark"] .xterm .xterm-selection-layer {
+  background-color: #264f78 !important;
+}
+
 /* 响应式设计 */
 @media (max-width: 768px) {
   .left-panel {
     width: 200px !important;
   }
-  
+
   .toolbar {
     display: none !important;
   }
-  
+
   .status-bar {
     font-size: 10px !important;
     padding: 2px 8px !important;
