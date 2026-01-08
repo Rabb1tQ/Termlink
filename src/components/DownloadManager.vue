@@ -92,7 +92,7 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { 
   ClearOutlined, 
   StopOutlined, 
@@ -102,9 +102,11 @@ import {
 } from '@ant-design/icons-vue'
 import { message } from 'ant-design-vue'
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 
 const downloads = ref([])
 let downloadIdCounter = 0
+let progressUnlisten = null
 
 // 添加下载任务
 function addDownload(fileName, remotePath, savePath, connectionId) {
@@ -133,29 +135,17 @@ function addDownload(fileName, remotePath, savePath, connectionId) {
 // 开始下载
 async function startDownload(download) {
   try {
-    // 模拟分块下载进度
-    const chunkSize = 1024 * 1024 // 1MB chunks
-    let downloaded = 0
+    console.log('=== DownloadManager 开始下载 ===', download)
     
-    // 首先获取文件大小
-    const fileInfo = await invoke('get_sftp_file_info', {
-      connectionId: download.connectionId,
-      path: download.remotePath
-    })
-    
-    download.total = fileInfo.size
-    
-    // 开始下载
-    const result = await invoke('download_sftp_file_with_progress', {
+    // 开始下载（使用正确的API）
+    await invoke('download_sftp_file', {
       connectionId: download.connectionId,
       remotePath: download.remotePath,
       localPath: download.savePath,
-      onProgress: (progress) => {
-        download.downloaded = progress.downloaded
-        download.progress = Math.round((progress.downloaded / download.total) * 100)
-        download.speed = calculateSpeed(download)
-      }
+      downloadId: download.id
     })
+    
+    console.log('✓ DownloadManager 下载API调用成功')
     
     if (download.status !== 'cancelled') {
       download.status = 'completed'
@@ -163,8 +153,8 @@ async function startDownload(download) {
       download.downloaded = download.total
       message.success(`文件下载完成: ${download.fileName}`)
     }
-    
   } catch (error) {
+    console.error('✗ DownloadManager 下载失败:', error)
     if (download.status !== 'cancelled') {
       download.status = 'error'
       download.error = error.toString()
@@ -248,6 +238,28 @@ function formatSpeed(bytesPerSecond) {
 defineExpose({
   addDownload,
   cancelDownload
+})
+
+// 生命周期钩子
+onMounted(async () => {
+  // 监听下载进度事件
+  progressUnlisten = await listen('download-progress', (event) => {
+    const { downloadId, downloaded, total, progress } = event.payload
+    const download = downloads.value.find(d => d.id === downloadId)
+    if (download && download.status === 'downloading') {
+      download.downloaded = downloaded
+      download.total = total
+      download.progress = progress
+      console.log(`📥 DownloadManager 进度: ${download.fileName} - ${progress}% (${formatSize(downloaded)}/${formatSize(total)})`)
+    }
+  })
+})
+
+onUnmounted(() => {
+  // 取消事件监听
+  if (progressUnlisten) {
+    progressUnlisten()
+  }
 })
 </script>
 
@@ -339,7 +351,4 @@ defineExpose({
   gap: 4px;
 }
 
-:deep(.ant-progress-line) {
-  margin-bottom: 4px;
-}
 </style>

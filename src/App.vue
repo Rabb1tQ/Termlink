@@ -81,6 +81,7 @@
       
       <!-- 右侧面板 -->
       <RightPanel 
+        ref="rightPanelRef"
         :collapsed="rightPanelCollapsed" 
         @toggle="rightPanelCollapsed = !rightPanelCollapsed"
         :connection-id="getActiveTab()?.type === 'ssh' ? getActiveTab()?.id : ''"
@@ -105,14 +106,11 @@
       :terminal-config="terminalConfig"
       @update-config="updateTerminalConfig"
     />
-    
-    <!-- 下载管理器 -->
-    <DownloadManager ref="downloadManagerRef" />
   </div>
 </template>
 
 <script setup>
-import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
+import { onMounted, onBeforeUnmount, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { message } from 'ant-design-vue'
 import 'ant-design-vue/dist/reset.css'
@@ -124,14 +122,12 @@ import Sidebar from './components/Sidebar.vue'
 import Terminal from './components/Terminal.vue'
 import SshModal from './components/SshModal.vue'
 import SettingsModal from './components/SettingsModal.vue'
-import DownloadManager from './components/DownloadManager.vue'
 import RightPanel from './components/RightPanel.vue'
 import StatusBar from './components/StatusBar.vue'
 import FileEditor from './components/FileEditor.vue'
 
 // 导入服务
 import SshService from './services/SshService'
-import SftpService from './services/SftpService'
 import ThemeService from './services/ThemeService'
 
 // 响应式数据
@@ -140,8 +136,7 @@ const activeId = ref('')
 const leftPanelCollapsed = ref(false)
 const showSshModal = ref(false)
 const showSettings = ref(false)
-const downloadManagerRef = ref(null)
-const sidebarRef = ref(null)
+const rightPanelRef = ref(null)
 const rightPanelCollapsed = ref(true)
 const sshEditMode = ref(false)
 const editingProfile = ref(null)
@@ -202,8 +197,8 @@ async function launchSavedProfile(p) {
 
 // 处理开始下载
 function handleStartDownload(downloadInfo) {
-  if (downloadManagerRef.value) {
-    downloadManagerRef.value.addDownload(
+  if (rightPanelRef.value) {
+    rightPanelRef.value.addDownload(
       downloadInfo.fileName,
       downloadInfo.remotePath,
       downloadInfo.savePath,
