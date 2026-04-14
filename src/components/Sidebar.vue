@@ -1,225 +1,249 @@
 <template>
-  <div class="left-panel" :class="{ collapsed: collapsed }">
-    <div class="panel-header">
-      <span>连接管理</span>
-      <a-button 
-        type="text" 
-        size="small" 
-        @click="$emit('toggle')"
-        class="collapse-btn"
-      >
-        {{ collapsed ? '>' : '<' }}
-      </a-button>
+  <div class="left-panel">
+    <!-- 按钮栏 - 始终显示，在最左侧 -->
+    <div class="sidebar-buttons">
+      <a-tooltip placement="right" title="连接管理">
+        <a-button
+          :type="activeTab === 'connections' ? 'primary' : 'default'"
+          size="large"
+          @click="handleTabClick('connections')"
+          class="sidebar-btn"
+        >
+          <ClusterOutlined />
+        </a-button>
+      </a-tooltip>
+
+      <a-tooltip placement="right" title="文件管理器">
+        <a-button
+          :type="activeTab === 'files' ? 'primary' : 'default'"
+          size="large"
+          @click="handleTabClick('files')"
+          class="sidebar-btn"
+        >
+          <FolderOutlined />
+        </a-button>
+      </a-tooltip>
     </div>
-    
-    <div class="panel-content" v-if="!collapsed">
-      <div class="section-title">已保存的连接</div>
-      
-      <!-- 搜索框 -->
-      <div class="search-section">
-        <a-input-search
-          v-model:value="searchText"
-          placeholder="搜索连接..."
-          size="small"
-          allow-clear
-          @search="onSearch"
-          @change="onSearch"
-        />
+
+    <!-- 内容区 - 可折叠，在右侧 -->
+    <div class="panel-content-wrapper" :class="{ collapsed: collapsed }">
+      <!-- 面板头部 -->
+      <div class="panel-header">
+        <span>{{ activeTab === 'connections' ? '连接管理' : '文件管理器' }}</span>
       </div>
-      
-      <!-- 分组视图切换 -->
-      <div class="view-controls">
-        <a-segmented 
-          v-model:value="viewMode" 
-          :options="[
-            { label: '列表', value: 'list' },
-            { label: '分组', value: 'group' }
-          ]"
-          size="small"
-        />
-      </div>
-      
-      <!-- 列表视图 -->
-      <div v-if="viewMode === 'list'" class="list-view">
-      <a-list 
-          :data-source="filteredProfiles" 
-        :split="false"
-        size="small"
-        class="profile-list"
-      >
-        <template #renderItem="{ item }">
-          <a-list-item 
-            @click="$emit('launchProfile', item)" 
-              @contextmenu.prevent="handleContextMenu($event, item)"
-            class="profile-item"
-          >
-              <a-list-item-meta>
-                <template #title>
-                  <div class="profile-title">
-                    <span>{{ item.name || (item.username ? `${item.username}@${item.host}` : item.host) }}</span>
-                    <div class="profile-tags" v-if="item.tags && item.tags.length">
+
+      <div class="panel-content">
+        <!-- 连接管理 Tab 内容 -->
+        <div v-if="activeTab === 'connections'" class="tab-content connections-content">
+          <div class="section-title">已保存的连接</div>
+
+          <!-- 搜索框 -->
+          <div class="search-section">
+            <a-input-search
+              v-model:value="searchText"
+              placeholder="搜索连接..."
+              size="small"
+              allow-clear
+              @search="onSearch"
+              @change="onSearch"
+            />
+          </div>
+
+          <!-- 分组视图切换 -->
+          <div class="view-controls">
+            <a-segmented
+              v-model:value="viewMode"
+              :options="[
+                { label: '列表', value: 'list' },
+                { label: '分组', value: 'group' }
+              ]"
+              size="small"
+            />
+          </div>
+
+          <!-- 列表视图 -->
+          <div v-if="viewMode === 'list'" class="list-view">
+            <a-list
+              :data-source="filteredProfiles"
+              :split="false"
+              size="small"
+              class="profile-list"
+            >
+              <template #renderItem="{ item }">
+                <a-list-item
+                  @click="$emit('launchProfile', item)"
+                  @contextmenu.prevent="handleContextMenu($event, item)"
+                  class="profile-item"
+                >
+                  <a-list-item-meta>
+                    <template #title>
+                      <div class="profile-title">
+                        <span>{{ item.name || (item.username ? `${item.username}@${item.host}` : item.host) }}</span>
+                        <div class="profile-tags" v-if="item.tags && item.tags.length">
+                          <a-tag v-for="tag in item.tags" :key="tag" size="small">{{ tag }}</a-tag>
+                        </div>
+                      </div>
+                    </template>
+                    <template #description>
+                      <div class="profile-desc">
+                        <span>{{ item.host }}:{{ item.port }}</span>
+                        <a-tag v-if="item.group" size="small" color="blue">{{ item.group }}</a-tag>
+                      </div>
+                    </template>
+                  </a-list-item-meta>
+                  <template #actions>
+                    <a-button
+                      type="text"
+                      size="small"
+                      danger
+                      @click.stop="deleteProfile(item)"
+                      class="delete-btn"
+                      title="删除连接"
+                    >
+                      <DeleteOutlined />
+                    </a-button>
+                  </template>
+                </a-list-item>
+              </template>
+            </a-list>
+          </div>
+
+          <!-- 分组视图 -->
+          <div v-else class="group-view">
+            <div v-for="(groupProfiles, groupName) in groupedProfiles" :key="groupName" class="group-section">
+              <div class="group-header" @click="toggleGroup(groupName)">
+                <span class="group-icon">
+                  {{ expandedGroups.has(groupName) ? '▼' : '▶' }}
+                </span>
+                <span class="group-name">{{ groupName || '未分组' }}</span>
+                <a-tag size="small">{{ groupProfiles.length }}</a-tag>
+              </div>
+              <div v-show="expandedGroups.has(groupName)" class="group-content">
+                <div
+                  v-for="item in groupProfiles"
+                  :key="item.id"
+                  @click="$emit('launchProfile', item)"
+                  @contextmenu.prevent="handleContextMenu($event, item)"
+                  class="group-item"
+                >
+                  <div class="item-content">
+                    <div class="item-title">{{ item.name || (item.username ? `${item.username}@${item.host}` : item.host) }}</div>
+                    <div class="item-desc">{{ item.host }}:{{ item.port }}</div>
+                    <div class="item-tags" v-if="item.tags && item.tags.length">
                       <a-tag v-for="tag in item.tags" :key="tag" size="small">{{ tag }}</a-tag>
                     </div>
                   </div>
-                </template>
-                <template #description>
-                  <div class="profile-desc">
-                    <span>{{ item.host }}:{{ item.port }}</span>
-                    <a-tag v-if="item.group" size="small" color="blue">{{ item.group }}</a-tag>
-                  </div>
-                </template>
-              </a-list-item-meta>
-              <template #actions>
-                <a-button 
-                  type="text" 
-                  size="small" 
-                  danger
-                  @click.stop="deleteProfile(item)"
-                  class="delete-btn"
-                  title="删除连接"
-                >
-                  <DeleteOutlined />
-                </a-button>
-              </template>
-          </a-list-item>
-        </template>
-      </a-list>
-      </div>
-      
-      <!-- 分组视图 -->
-      <div v-else class="group-view">
-        <div v-for="(groupProfiles, groupName) in groupedProfiles" :key="groupName" class="group-section">
-          <div class="group-header" @click="toggleGroup(groupName)">
-            <span class="group-icon">
-              {{ expandedGroups.has(groupName) ? '▼' : '▶' }}
-            </span>
-            <span class="group-name">{{ groupName || '未分组' }}</span>
-            <a-tag size="small">{{ groupProfiles.length }}</a-tag>
+                  <a-button
+                    type="text"
+                    size="small"
+                    danger
+                    @click.stop="deleteProfile(item)"
+                    class="delete-btn"
+                    title="删除连接"
+                  >
+                    <DeleteOutlined />
+                  </a-button>
+                </div>
+              </div>
+            </div>
           </div>
-          <div v-show="expandedGroups.has(groupName)" class="group-content">
-            <div 
-              v-for="item in groupProfiles" 
-              :key="item.id"
-              @click="$emit('launchProfile', item)"
-              @contextmenu.prevent="handleContextMenu($event, item)"
-              class="group-item"
+        </div>
+
+        <!-- 文件管理器 Tab 内容 -->
+        <div v-else-if="activeTab === 'files'" class="tab-content files-content">
+          <!-- SFTP连接状态显示 -->
+          <div v-if="currentSftpConnection" class="current-connection">
+            <div class="connection-info">
+              <div class="status-indicator connected"></div>
+              <span>{{ currentSftpConnection.title }}</span>
+            </div>
+          </div>
+
+          <!-- SFTP文件浏览器 -->
+          <div v-if="currentSftpConnection" class="sftp-browser">
+            <div class="browser-toolbar">
+              <a-button-group size="small">
+                <a-button @click="sftpGoBack" :disabled="!canSftpGoBack" title="返回">
+                  <ArrowLeftOutlined />
+                </a-button>
+                <a-button @click="sftpGoUp" :disabled="sftpIsAtRoot" title="上级目录">
+                  <ArrowUpOutlined />
+                </a-button>
+                <a-button @click="refreshSftpFiles" title="刷新">
+                  <ReloadOutlined />
+                </a-button>
+                <a-button @click="createNewFolder" title="新建文件夹">
+                  <FolderAddOutlined />
+                </a-button>
+              </a-button-group>
+
+              <div class="toolbar-right">
+                <a-tooltip title="显示隐藏文件">
+                  <a-button
+                    type="text"
+                    size="small"
+                    @click="toggleShowHidden"
+                    :class="{ active: showHiddenFiles }"
+                  >
+                    <EyeOutlined v-if="showHiddenFiles" />
+                    <EyeInvisibleOutlined v-else />
+                  </a-button>
+                </a-tooltip>
+              </div>
+            </div>
+
+            <div class="current-path">
+              <a-input
+                v-model:value="currentSftpState.pathInput"
+                @pressEnter="navigateToPath"
+                @blur="navigateToPath"
+                size="small"
+                placeholder="输入路径后按Enter"
+                class="path-input"
+              />
+            </div>
+
+            <div
+              class="file-list"
+              ref="fileListRef"
+              @drop.prevent="handleDrop"
+              @dragover.prevent="handleDragOver"
+              @dragleave.prevent="handleDragLeave"
+              @dragenter.prevent="handleDragEnter"
+              :class="{ 'drag-over': isDraggingOver }"
             >
-              <div class="item-content">
-                <div class="item-title">{{ item.name || (item.username ? `${item.username}@${item.host}` : item.host) }}</div>
-                <div class="item-desc">{{ item.host }}:{{ item.port }}</div>
-                <div class="item-tags" v-if="item.tags && item.tags.length">
-                  <a-tag v-for="tag in item.tags" :key="tag" size="small">{{ tag }}</a-tag>
-                </div>
-              </div>
-              <a-button 
-                type="text" 
-                size="small" 
-                danger
-                @click.stop="deleteProfile(item)"
-                class="delete-btn"
-                title="删除连接"
-              >
-                <DeleteOutlined />
-              </a-button>
-            </div>
-          </div>
-        </div>
-      </div>
-      
-      <div class="section-title">文件管理器</div>
-      <div class="file-manager-section">
-        <!-- SFTP连接状态显示 -->
-        <div v-if="currentSftpConnection" class="current-connection">
-          <div class="connection-info">
-            <div class="status-indicator connected"></div>
-            <span>{{ currentSftpConnection.title }}</span>
-          </div>
-        </div>
-        
-        <!-- SFTP文件浏览器 -->
-        <div v-if="currentSftpConnection" class="sftp-browser">
-          <div class="browser-toolbar">
-            <a-button-group size="small">
-              <a-button @click="sftpGoBack" :disabled="!canSftpGoBack" title="返回">
-                <ArrowLeftOutlined />
-              </a-button>
-              <a-button @click="sftpGoUp" :disabled="sftpIsAtRoot" title="上级目录">
-                <ArrowUpOutlined />
-              </a-button>
-              <a-button @click="refreshSftpFiles" title="刷新">
-                <ReloadOutlined />
-              </a-button>
-              <a-button @click="createNewFolder" title="新建文件夹">
-                <FolderAddOutlined />
-              </a-button>
-            </a-button-group>
-            
-            <div class="toolbar-right">
-              <a-tooltip title="显示隐藏文件">
-                <a-button 
-                  type="text" 
-                  size="small" 
-                  @click="toggleShowHidden"
-                  :class="{ active: showHiddenFiles }"
+              <a-spin :spinning="currentSftpState?.loading || false" size="small">
+                <div
+                  v-for="file in currentSftpState?.files || []"
+                  :key="file.name"
+                  @click="handleSftpFileClick(file)"
+                  @dblclick="handleSftpFileDoubleClick(file)"
+                  @contextmenu.prevent="showSftpContextMenu($event, file)"
+                  class="file-item"
+                  :class="{ directory: file.is_dir }"
                 >
-                  <EyeOutlined v-if="showHiddenFiles" />
-                  <EyeInvisibleOutlined v-else />
-                </a-button>
-              </a-tooltip>
+                  <component :is="getSftpFileIcon(file)" class="file-icon" />
+                  <span class="file-name">{{ file.name }}</span>
+                  <div v-if="!file.is_dir" class="file-size">
+                    {{ formatFileSize(file.size) }}
+                  </div>
+                </div>
+
+                <!-- 拖拽提示 -->
+                <div v-if="isDraggingOver" class="drag-overlay">
+                  <div class="drag-hint">
+                    <CloudUploadOutlined style="font-size: 48px;" />
+                    <div>释放以上传文件到当前目录</div>
+                  </div>
+                </div>
+              </a-spin>
             </div>
           </div>
-          
-          <div class="current-path">
-            <a-input 
-              v-model:value="currentSftpState.pathInput" 
-              @pressEnter="navigateToPath"
-              @blur="navigateToPath"
-              size="small"
-              placeholder="输入路径后按Enter"
-              class="path-input"
-            />
+
+          <!-- 未连接状态 -->
+          <div v-else class="no-connection">
+            <a-empty description="请切换到SSH标签页来浏览远程文件" size="small" />
           </div>
-          
-          <div 
-            class="file-list" 
-            ref="fileListRef"
-            @drop.prevent="handleDrop"
-            @dragover.prevent="handleDragOver"
-            @dragleave.prevent="handleDragLeave"
-            @dragenter.prevent="handleDragEnter"
-            :class="{ 'drag-over': isDraggingOver }"
-          >
-            <a-spin :spinning="currentSftpState?.loading || false" size="small">
-              <div 
-                v-for="file in currentSftpState?.files || []" 
-                :key="file.name"
-                @click="handleSftpFileClick(file)"
-                @dblclick="handleSftpFileDoubleClick(file)"
-                @contextmenu.prevent="showSftpContextMenu($event, file)"
-                class="file-item"
-                :class="{ directory: file.is_dir }"
-              >
-                <component :is="getSftpFileIcon(file)" class="file-icon" />
-                <span class="file-name">{{ file.name }}</span>
-                <div v-if="!file.is_dir" class="file-size">
-                  {{ formatFileSize(file.size) }}
-                </div>
-              </div>
-              
-              <!-- 拖拽提示 -->
-              <div v-if="isDraggingOver" class="drag-overlay">
-                <div class="drag-hint">
-                  <CloudUploadOutlined style="font-size: 48px;" />
-                  <div>释放以上传文件到当前目录</div>
-                </div>
-              </div>
-            </a-spin>
-          </div>
-        </div>
-        
-        <!-- 未连接状态 -->
-        <div v-else class="no-connection">
-          <a-empty description="请切换到SSH标签页来浏览远程文件" size="small" />
         </div>
       </div>
     </div>
@@ -228,8 +252,9 @@
 
 <script setup>
 import { ref, computed, watch } from 'vue'
-import { 
-  FolderOutlined, 
+import {
+  FolderOutlined,
+  ClusterOutlined,
   DeleteOutlined,
   CloseOutlined,
   ArrowLeftOutlined,
@@ -265,6 +290,35 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['toggle', 'launchProfile', 'showFileManager', 'refreshProfiles', 'openFilePreview', 'startDownload', 'editProfile'])
+
+// Tab 切换状态
+const activeTab = ref('connections') // 'connections' 或 'files'
+
+// 处理 Tab 点击（与右侧面板逻辑一致）
+function handleTabClick(tab) {
+  // 如果点击的是当前激活的 Tab，切换折叠状态
+  if (activeTab.value === tab) {
+    emit('toggle')
+  } else {
+    // 切换到新 Tab
+    activeTab.value = tab
+    // 如果当前是折叠状态，自动展开
+    if (props.collapsed) {
+      emit('toggle')
+    }
+  }
+}
+
+// 暴露 switchTab 方法给父组件
+defineExpose({
+  switchTab(tab) {
+    activeTab.value = tab
+    // 如果当前是折叠状态，自动展开
+    if (props.collapsed) {
+      emit('toggle')
+    }
+  }
+})
 
 // 搜索和视图状态
 const searchText = ref('')
@@ -1143,16 +1197,54 @@ function copyProfileConfig(profile) {
 
 <style scoped>
 .left-panel {
-  width: 250px;
-  background: var(--panel-bg);
-  border-right: 1px solid var(--border-color);
   display: flex;
-  flex-direction: column;
-  transition: width 0.3s ease;
+  background: var(--panel-bg);
+  height: 100%;
+  position: relative;
 }
 
-.left-panel.collapsed {
-  width: 50px;
+/* 按钮栏 - 在最左侧，始终可见 */
+.sidebar-buttons {
+  width: 60px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 8px;
+  background: var(--panel-header-bg);
+  border-right: 1px solid var(--border-color);
+}
+
+.sidebar-btn {
+  width: 44px !important;
+  height: 44px !important;
+  padding: 0 !important;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+}
+
+.sidebar-btn :deep(.anticon) {
+  font-size: 20px;
+}
+
+/* 内容区 - 在右侧，可折叠 */
+.panel-content-wrapper {
+  display: flex;
+  flex-direction: column;
+  width: 280px;
+  border-left: 1px solid var(--border-color);
+  transition: width 0.3s ease, opacity 0.3s ease;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.panel-content-wrapper.collapsed {
+  width: 0;
+  opacity: 0;
+  pointer-events: none;
+  border-left: none;
 }
 
 .panel-header {
@@ -1163,19 +1255,43 @@ function copyProfileConfig(profile) {
   background: var(--panel-header-bg);
   border-bottom: 1px solid var(--border-color);
   font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
 }
 
-.collapse-btn {
-  color: var(--text-color);
-  padding: 0;
-  width: 20px;
-  height: 20px;
+.panel-header:hover {
+  background: var(--hover-bg);
 }
 
 .panel-content {
-  flex: 1;
   padding: 16px;
   overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Tab 内容样式 */
+.tab-content {
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.connections-content {
+  /* 连接管理内容 */
+}
+
+.files-content {
+  /* 文件管理内容 */
 }
 
 .section-title {
@@ -1520,6 +1636,30 @@ function copyProfileConfig(profile) {
 
 .file-item:hover {
   background: var(--hover-bg);
+}
+
+/* Tab 内容样式 */
+.tab-content {
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.connections-content {
+  /* 连接管理内容 */
+}
+
+.files-content {
+  /* 文件管理内容 */
 }
 
 /* 响应式设计 */

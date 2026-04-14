@@ -13,8 +13,9 @@
     <!-- 主体区域 -->
     <div class="main-container">
       <!-- 左侧面板 -->
-      <Sidebar 
-        :collapsed="leftPanelCollapsed" 
+      <Sidebar
+        ref="sidebarRef"
+        :collapsed="leftPanelCollapsed"
         @toggle="leftPanelCollapsed = !leftPanelCollapsed"
         :profiles="profiles"
         @launch-profile="launchSavedProfile"
@@ -138,6 +139,7 @@ const showSshModal = ref(false)
 const showSettings = ref(false)
 const rightPanelRef = ref(null)
 const rightPanelCollapsed = ref(true)
+const sidebarRef = ref(null)
 const sshEditMode = ref(false)
 const editingProfile = ref(null)
 
@@ -266,7 +268,15 @@ function editProfile(profile) {
 
 // 通知侧边栏显示文件管理器
 function showFileManager() {
-  // 直接通知侧边栏展开文件管理区域，不需要额外处理
+  // 展开左侧面板（如果折叠）
+  if (leftPanelCollapsed.value) {
+    leftPanelCollapsed.value = false
+  }
+  
+  // 切换到文件管理 Tab
+  if (sidebarRef.value && sidebarRef.value.switchTab) {
+    sidebarRef.value.switchTab('files')
+  }
 }
 
 // 打开文件预览
