@@ -190,6 +190,7 @@ async function launchSavedProfile(p) {
     message.error({
       content: error.toString(),
       duration: 8, // 显示8秒，给用户足够时间阅读
+      closable: true,
       style: {
         marginTop: '50px',
         maxWidth: '400px'
@@ -236,6 +237,7 @@ async function submitSsh(sshData) {
     message.error({
       content: error.toString(),
       duration: 8, // 显示8秒，给用户足够时间阅读
+      closable: true,
       style: {
         marginTop: '50px',
         maxWidth: '400px'
@@ -299,26 +301,37 @@ async function openFilePreview(fileInfo) {
   activeId.value = id
 }
 
+// 正在关闭的标签页ID集合，防止重复关闭
+const closingTabs = new Set()
+
 // 关闭标签页
 async function closeTab(id) {
-  const index = tabs.value.findIndex(t => t.id === id)
-  if (index === -1) return
+  // 防止重复关闭同一个tab
+  if (closingTabs.has(id)) return
+  closingTabs.add(id)
   
-  const tab = tabs.value[index]
-  
-  // 清理资源
-  if (tab.type === 'ssh') {
-    await SshService.closeConnection(id);
-  } else if (tab.type === 'local') {
-    await invoke('close_pty', { id });
-  }
-  
-  // 移除标签页
-  tabs.value.splice(index, 1)
-  
-  // 如果关闭的是当前活动标签页，切换到前一个标签页
-  if (activeId.value === id) {
-    activeId.value = tabs.value[index - 1]?.id || tabs.value[0]?.id || ''
+  try {
+    const index = tabs.value.findIndex(t => t.id === id)
+    if (index === -1) return
+    
+    const tab = tabs.value[index]
+    
+    // 先移除标签页，防止在清理资源期间收到exit事件导致重复关闭
+    tabs.value.splice(index, 1)
+    
+    // 如果关闭的是当前活动标签页，切换到相邻标签页
+    if (activeId.value === id) {
+      activeId.value = tabs.value[Math.min(index, tabs.value.length - 1)]?.id || ''
+    }
+    
+    // 清理资源（在移除tab之后执行，避免exit事件触发重复关闭）
+    if (tab.type === 'ssh') {
+      await SshService.closeConnection(id);
+    } else if (tab.type === 'local') {
+      await invoke('close_pty', { id });
+    }
+  } finally {
+    closingTabs.delete(id)
   }
 }
 

@@ -12,7 +12,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import { message } from 'ant-design-vue'
+import { notification } from 'ant-design-vue'
 import '@xterm/xterm/css/xterm.css'
 import SshService from '../services/SshService'
 
@@ -226,12 +226,13 @@ async function bindSession() {
         if (terminal.value) {
           terminal.value.writeln(`\r\n\x1b[31m${errorMsg}\x1b[0m`)
         }
-        // 显示错误弹窗
-        message.error({
-          content: errorMsg,
+        // 显示错误弹窗（使用notification，自带关闭按钮）
+        notification.error({
+          message: 'SSH连接失败',
+          description: errorMsg,
           duration: 8,
+          placement: 'topRight',
           style: {
-            marginTop: '50px',
             maxWidth: '400px'
           }
         })

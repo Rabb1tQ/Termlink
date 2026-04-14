@@ -1,5 +1,17 @@
 import { invoke } from '@tauri-apps/api/core';
 
+// 自增计数器，确保id唯一性
+let sshIdCounter = 0;
+
+/**
+ * 生成唯一的SSH连接ID
+ * @returns {string} 唯一ID
+ */
+function generateSshId() {
+  sshIdCounter++;
+  return `ssh-${Date.now()}-${sshIdCounter}-${Math.random().toString(36).substring(2, 8)}`;
+}
+
 /**
  * SSH服务 - 处理SSH连接相关功能
  */
@@ -10,7 +22,7 @@ class SshService {
    * @returns {Object} 连接信息
    */
   async launchProfile(profile) {
-    const id = `ssh-${Date.now()}`;
+    const id = generateSshId();
     const title = profile.username ? `${profile.username}@${profile.host}` : profile.host;
     
     // 获取保存的密码
@@ -67,7 +79,7 @@ class SshService {
    * @returns {Object} 连接信息
    */
   async createSshConnection(sshData) {
-    const id = `ssh-${Date.now()}`;
+    const id = generateSshId();
     const title = sshData.name || sshData.host;
     const profile = { 
       id, 
