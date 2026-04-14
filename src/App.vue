@@ -102,11 +102,12 @@
     />
     
     <!-- 设置模态框 -->
-    <SettingsModal 
-      v-model:visible="showSettings" 
+    <SettingsModal
+      v-model:visible="showSettings"
       :terminal-config="terminalConfig"
       @update-config="updateTerminalConfig"
     />
+    
   </div>
 </template>
 

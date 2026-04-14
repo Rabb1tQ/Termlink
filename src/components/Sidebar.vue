@@ -23,13 +23,24 @@
           <FolderOutlined />
         </a-button>
       </a-tooltip>
+
+      <a-tooltip placement="right" title="标签与分组">
+        <a-button
+          :type="activeTab === 'tags' ? 'primary' : 'default'"
+          size="large"
+          @click="handleTabClick('tags')"
+          class="sidebar-btn"
+        >
+          <TagsOutlined />
+        </a-button>
+      </a-tooltip>
     </div>
 
     <!-- 内容区 - 可折叠，在右侧 -->
     <div class="panel-content-wrapper" :class="{ collapsed: collapsed }">
       <!-- 面板头部 -->
       <div class="panel-header">
-        <span>{{ activeTab === 'connections' ? '连接管理' : '文件管理器' }}</span>
+        <span>{{ panelTitle }}</span>
       </div>
 
       <div class="panel-content">
@@ -245,6 +256,11 @@
             <a-empty description="请切换到SSH标签页来浏览远程文件" size="small" />
           </div>
         </div>
+
+        <!-- 标签与分组管理 Tab 内容 -->
+        <div v-else-if="activeTab === 'tags'" class="tab-content tags-content">
+          <TagGroupManager ref="tagGroupManagerRef" @refresh-profiles="emit('refreshProfiles')" />
+        </div>
       </div>
     </div>
   </div>
@@ -269,10 +285,12 @@ import {
   EyeOutlined,
   EyeInvisibleOutlined,
   CloudUploadOutlined,
-  FolderAddOutlined
+  FolderAddOutlined,
+  TagsOutlined
 } from '@ant-design/icons-vue'
 import { Modal, message, Dropdown, Menu } from 'ant-design-vue'
 import { invoke } from '@tauri-apps/api/core'
+import TagGroupManager from './TagGroupManager.vue'
 
 const props = defineProps({
   collapsed: {
@@ -292,7 +310,18 @@ const props = defineProps({
 const emit = defineEmits(['toggle', 'launchProfile', 'showFileManager', 'refreshProfiles', 'openFilePreview', 'startDownload', 'editProfile'])
 
 // Tab 切换状态
-const activeTab = ref('connections') // 'connections' 或 'files'
+const activeTab = ref('connections') // 'connections'、'files' 或 'tags'
+const tagGroupManagerRef = ref(null)
+
+// 面板标题
+const panelTitle = computed(() => {
+  const titles = {
+    connections: '连接管理',
+    files: '文件管理器',
+    tags: '标签与分组'
+  }
+  return titles[activeTab.value] || '连接管理'
+})
 
 // 处理 Tab 点击（与右侧面板逻辑一致）
 function handleTabClick(tab) {
@@ -306,6 +335,10 @@ function handleTabClick(tab) {
     if (props.collapsed) {
       emit('toggle')
     }
+    // 切换到标签管理 Tab 时刷新数据
+    if (tab === 'tags' && tagGroupManagerRef.value) {
+      tagGroupManagerRef.value.refresh()
+    }
   }
 }
 
@@ -316,6 +349,10 @@ defineExpose({
     // 如果当前是折叠状态，自动展开
     if (props.collapsed) {
       emit('toggle')
+    }
+    // 切换到标签管理 Tab 时刷新数据
+    if (tab === 'tags' && tagGroupManagerRef.value) {
+      tagGroupManagerRef.value.refresh()
     }
   }
 })
