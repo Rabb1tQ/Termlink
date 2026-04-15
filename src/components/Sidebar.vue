@@ -82,7 +82,7 @@
             >
               <template #renderItem="{ item }">
                 <a-list-item
-                  @click="$emit('launchProfile', item)"
+                  @dblclick="$emit('launchProfile', item)"
                   @contextmenu.prevent="handleContextMenu($event, item)"
                   class="profile-item"
                 >
@@ -133,7 +133,7 @@
                 <div
                   v-for="item in groupProfiles"
                   :key="item.id"
-                  @click="$emit('launchProfile', item)"
+                  @dblclick="$emit('launchProfile', item)"
                   @contextmenu.prevent="handleContextMenu($event, item)"
                   class="group-item"
                 >
@@ -183,12 +183,39 @@
                 <a-button @click="refreshSftpFiles" title="刷新">
                   <ReloadOutlined />
                 </a-button>
-                <a-button @click="createNewFolder" title="新建文件夹">
-                  <FolderAddOutlined />
-                </a-button>
               </a-button-group>
 
               <div class="toolbar-right">
+                <a-tooltip title="新建文件">
+                  <a-button
+                    type="text"
+                    size="small"
+                    @click="createNewFile"
+                  >
+                    <FileAddOutlined />
+                  </a-button>
+                </a-tooltip>
+                
+                <a-tooltip title="新建文件夹">
+                  <a-button
+                    type="text"
+                    size="small"
+                    @click="createNewFolder"
+                  >
+                    <FolderAddOutlined />
+                  </a-button>
+                </a-tooltip>
+                
+                <a-tooltip title="上传文件">
+                  <a-button
+                    type="text"
+                    size="small"
+                    @click="uploadFiles"
+                  >
+                    <UploadOutlined />
+                  </a-button>
+                </a-tooltip>
+                
                 <a-tooltip title="显示隐藏文件">
                   <a-button
                     type="text"
@@ -267,7 +294,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, h } from 'vue'
 import {
   FolderOutlined,
   ClusterOutlined,
@@ -286,6 +313,8 @@ import {
   EyeInvisibleOutlined,
   CloudUploadOutlined,
   FolderAddOutlined,
+  FileAddOutlined,
+  UploadOutlined,
   TagsOutlined
 } from '@ant-design/icons-vue'
 import { Modal, message, Dropdown, Menu } from 'ant-design-vue'
@@ -722,18 +751,20 @@ function showSftpContextMenu(event, file) {
     padding: 4px 0;
   `
   
-  // 菜单项
+  // 菜单项 - 只针对文件/文件夹的操作
   const menuItems = []
-  
+
   // 下载
-  menuItems.push({
-    label: '📥 下载',
-    action: () => {
-      downloadFile(file)
-      menu.remove()
-    }
-  })
-  
+  if (!file.is_dir) {
+    menuItems.push({
+      label: '📥 下载',
+      action: () => {
+        downloadFile(file)
+        menu.remove()
+      }
+    })
+  }
+
   // 如果是文本文件，添加打开/预览选项
   if (!file.is_dir && isTextFile(file.name)) {
     menuItems.push({
@@ -744,10 +775,10 @@ function showSftpContextMenu(event, file) {
       }
     })
   }
-  
+
   // 分隔线
   menuItems.push({ divider: true })
-  
+
   // 重命名
   menuItems.push({
     label: '✏️ 重命名',
@@ -756,7 +787,7 @@ function showSftpContextMenu(event, file) {
       menu.remove()
     }
   })
-  
+
   // 删除
   menuItems.push({
     label: '🗑️ 删除',
@@ -766,10 +797,10 @@ function showSftpContextMenu(event, file) {
     },
     danger: true
   })
-  
+
   // 分隔线
   menuItems.push({ divider: true })
-  
+
   // 复制路径
   menuItems.push({
     label: '📋 复制路径',
@@ -1013,34 +1044,149 @@ async function handleDrop(event) {
 async function uploadFileToServer(file) {
   const state = currentSftpState.value
   if (!state || !currentSftpConnection.value) return
-  
+
   try {
     // 获取文件路径（Tauri会处理这个）
     const localPath = file.path
-    
-    if (!localPath) {
-      message.error(`无法获取文件路径: ${file.name}`)
-      return
+
+    // 如果有本地路径，使用后端上传
+    if (localPath) {
+      const remotePath = state.currentPath === '/'
+        ? `/${file.name}`
+        : `${state.currentPath}/${file.name}`
+
+      message.loading(`正在上传 ${file.name}...`, 0)
+
+      await invoke('upload_sftp_file', {
+        connectionId: currentSftpConnection.value.id,
+        localPath,
+        remotePath
+      })
+
+      message.destroy()
+      message.success(`上传成功: ${file.name}`)
+    } else {
+      // 如果没有本地路径（浏览器环境），读取文件内容上传
+      await uploadFileContent(file)
     }
-    
-    const remotePath = state.currentPath === '/' 
-      ? `/${file.name}` 
-      : `${state.currentPath}/${file.name}`
-    
-    message.loading(`正在上传 ${file.name}...`, 0)
-    
-    await invoke('upload_sftp_file', {
-      connectionId: currentSftpConnection.value.id,
-      localPath,
-      remotePath
-    })
-    
-    message.destroy()
-    message.success(`上传成功: ${file.name}`)
-    
+
     // 刷新文件列表
     refreshSftpFiles()
+
+  } catch (error) {
+    message.destroy()
+    console.error('上传文件失败:', error)
+    message.error(`上传失败: ${file.name} - ${error}`)
+  }
+}
+
+// 创建新文件
+async function createNewFile() {
+  const state = currentSftpState.value
+  if (!state || !currentSftpConnection.value) return
+
+  let inputRef = { value: null }
+
+  Modal.confirm({
+    title: '新建文件',
+    content: () => h('input', {
+      placeholder: '请输入文件名称（如: test.txt）',
+      style: 'width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--panel-bg); color: var(--text-color);',
+      onVnodeMounted: ({ el }) => {
+        inputRef.value = el
+        setTimeout(() => el.focus(), 100)
+      }
+    }),
+    okText: '创建',
+    cancelText: '取消',
+    onOk: async () => {
+      const fileName = inputRef.value?.value?.trim()
+
+      if (!fileName) {
+        message.warning('请输入文件名称')
+        return Promise.reject()
+      }
+
+      try {
+        const filePath = state.currentPath === '/'
+          ? `/${fileName}`
+          : `${state.currentPath}/${fileName}`
+
+        console.log('创建文件路径:', filePath)
+
+        // 创建空文件
+        await invoke('create_sftp_file', {
+          connectionId: currentSftpConnection.value.id,
+          path: filePath
+        })
+
+        message.success('文件创建成功')
+        refreshSftpFiles()
+      } catch (error) {
+        console.error('创建文件失败:', error)
+        message.error('创建文件失败: ' + error)
+        return Promise.reject()
+      }
+    }
+  })
+}
+
+// 选择并上传文件
+async function uploadFiles() {
+  const state = currentSftpState.value
+  if (!state || !currentSftpConnection.value) return
+
+  try {
+    // 创建一个隐藏的 input 元素来选择文件
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.multiple = true
     
+    input.onchange = async () => {
+      const files = input.files
+      if (!files || files.length === 0) return
+
+      // 上传每个文件
+      for (const file of files) {
+        await uploadFileContent(file)
+      }
+
+      // 刷新文件列表
+      refreshSftpFiles()
+    }
+
+    input.click()
+  } catch (error) {
+    console.error('选择文件失败:', error)
+    message.error('选择文件失败: ' + error)
+  }
+}
+
+// 上传文件内容（通过读取文件内容后上传）
+async function uploadFileContent(file) {
+  const state = currentSftpState.value
+  if (!state || !currentSftpConnection.value) return
+
+  try {
+    const remotePath = state.currentPath === '/'
+      ? `/${file.name}`
+      : `${state.currentPath}/${file.name}`
+
+    message.loading(`正在上传 ${file.name}...`, 0)
+
+    // 读取文件内容为 ArrayBuffer
+    const arrayBuffer = await file.arrayBuffer()
+    const bytes = Array.from(new Uint8Array(arrayBuffer))
+
+    // 调用后端上传文件内容
+    await invoke('write_sftp_file_bytes', {
+      connectionId: currentSftpConnection.value.id,
+      path: remotePath,
+      bytes: bytes
+    })
+
+    message.destroy()
+    message.success(`上传成功: ${file.name}`)
   } catch (error) {
     message.destroy()
     console.error('上传文件失败:', error)
@@ -1052,37 +1198,39 @@ async function uploadFileToServer(file) {
 async function createNewFolder() {
   const state = currentSftpState.value
   if (!state || !currentSftpConnection.value) return
-  
+
+  let inputRef = { value: null }
+
   Modal.confirm({
     title: '新建文件夹',
-    content: () => {
-      const input = document.createElement('input')
-      input.placeholder = '请输入文件夹名称'
-      input.style.cssText = 'width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--panel-bg); color: var(--text-color);'
-      setTimeout(() => input.focus(), 100)
-      return input
-    },
+    content: () => h('input', {
+      placeholder: '请输入文件夹名称',
+      style: 'width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--panel-bg); color: var(--text-color);',
+      onVnodeMounted: ({ el }) => {
+        inputRef.value = el
+        setTimeout(() => el.focus(), 100)
+      }
+    }),
     okText: '创建',
     cancelText: '取消',
     onOk: async () => {
-      const input = document.querySelector('.ant-modal-body input')
-      const folderName = input?.value?.trim()
-      
+      const folderName = inputRef.value?.value?.trim()
+
       if (!folderName) {
         message.warning('请输入文件夹名称')
         return Promise.reject()
       }
-      
+
       try {
-        const folderPath = state.currentPath === '/' 
-          ? `/${folderName}` 
+        const folderPath = state.currentPath === '/'
+          ? `/${folderName}`
           : `${state.currentPath}/${folderName}`
-        
+
         await invoke('create_sftp_directory', {
           connectionId: currentSftpConnection.value.id,
           path: folderPath
         })
-        
+
         message.success('文件夹创建成功')
         refreshSftpFiles()
       } catch (error) {

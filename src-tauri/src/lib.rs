@@ -59,6 +59,8 @@ pub fn run() {
       sftp_russh::delete_sftp_file,
       sftp_russh::delete_sftp_directory,
       sftp_russh::create_sftp_directory,
+      sftp_russh::create_sftp_file,
+      sftp_russh::write_sftp_file_bytes,
       sftp_russh::rename_sftp_file,
       sftp_russh::get_sftp_file_metadata,
       

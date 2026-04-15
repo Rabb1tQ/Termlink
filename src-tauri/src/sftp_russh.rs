@@ -488,16 +488,59 @@ pub async fn delete_sftp_directory(connection_id: String, path: String) -> Resul
         };
         connection.session.clone()
     };
-    
-    println!("删除目录: {}", path);
-    
-    match session.remove_dir(&path).await {
-        Ok(_) => {
-            println!("目录删除成功");
-            Ok(())
-        },
-        Err(e) => Err(format!("删除目录失败: {}", e)),
-    }
+
+    println!("删除目录（递归）: {}", path);
+
+    // 递归删除目录及其所有内容
+    recursive_delete_dir(&session, &path).await
+}
+
+// 递归删除目录（包括非空目录）
+fn recursive_delete_dir<'a>(session: &'a SftpSession, path: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
+    Box::pin(async move {
+        // 读取目录内容
+        let entries = match session.read_dir(path).await {
+            Ok(entries) => entries,
+            Err(e) => {
+                // 如果读取失败，可能是空目录或权限问题，尝试直接删除
+                return match session.remove_dir(path).await {
+                    Ok(_) => Ok(()),
+                    Err(e) => Err(format!("删除目录失败: {}", e)),
+                };
+            }
+        };
+
+        // 递归删除所有子项
+        for entry in entries {
+            let file_name = entry.file_name().to_string();
+            let is_dir = entry.file_type().is_dir();
+            
+            let entry_path = if path.ends_with('/') {
+                format!("{}{}", path, file_name)
+            } else {
+                format!("{}/{}", path, file_name)
+            };
+
+            if is_dir {
+                // 递归删除子目录
+                recursive_delete_dir(session, &entry_path).await?;
+            } else {
+                // 删除文件
+                if let Err(e) = session.remove_file(&entry_path).await {
+                    println!("删除文件失败: {} - {}", entry_path, e);
+                }
+            }
+        }
+
+        // 删除空目录
+        match session.remove_dir(path).await {
+            Ok(_) => {
+                println!("目录删除成功: {}", path);
+                Ok(())
+            },
+            Err(e) => Err(format!("删除目录失败: {}", e)),
+        }
+    })
 }
 
 // 获取文件元数据
@@ -542,5 +585,66 @@ pub async fn get_sftp_file_metadata(connection_id: String, path: String) -> Resu
             Ok(file_info)
         },
         Err(e) => Err(format!("获取文件元数据失败: {}", e)),
+    }
+}
+
+// 创建空文件
+#[tauri::command]
+pub async fn create_sftp_file(connection_id: String, path: String) -> Result<(), String> {
+    let session = {
+        let connections = SFTP_CONNECTIONS.lock();
+        let connection = match connections.get(&connection_id) {
+            Some(conn) => conn,
+            None => return Err("SFTP连接不存在".to_string()),
+        };
+        connection.session.clone()
+    };
+
+    println!("创建文件: {}", path);
+
+    // 使用 create 方法创建文件并获取写入句柄
+    match session.create(&path).await {
+        Ok(file) => {
+            // 文件句柄在 drop 时自动关闭
+            drop(file);
+            println!("文件创建成功: {}", path);
+            Ok(())
+        },
+        Err(e) => Err(format!("创建文件失败: {}", e)),
+    }
+}
+
+// 写入文件内容（通过字节数组）
+#[tauri::command]
+pub async fn write_sftp_file_bytes(
+    connection_id: String,
+    path: String,
+    bytes: Vec<u8>
+) -> Result<(), String> {
+    let session = {
+        let connections = SFTP_CONNECTIONS.lock();
+        let connection = match connections.get(&connection_id) {
+            Some(conn) => conn,
+            None => return Err("SFTP连接不存在".to_string()),
+        };
+        connection.session.clone()
+    };
+
+    println!("写入文件: {} ({} 字节)", path, bytes.len());
+
+    // 使用 create 方法创建文件并获取写入句柄
+    match session.create(&path).await {
+        Ok(mut file) => {
+            // 写入文件内容
+            use tokio::io::AsyncWriteExt;
+            if let Err(e) = file.write_all(&bytes).await {
+                return Err(format!("写入文件失败: {}", e));
+            }
+            // 文件句柄在 drop 时自动关闭
+            drop(file);
+            println!("文件写入成功: {}", path);
+            Ok(())
+        },
+        Err(e) => Err(format!("创建/写入文件失败: {}", e)),
     }
 }
