@@ -6,7 +6,7 @@ use std::sync::Arc;
 use russh::*;
 use russh_keys::*;
 use russh_sftp::client::SftpSession;
-use tokio::io::{AsyncWriteExt, AsyncReadExt};
+use tokio::io::AsyncWriteExt;
 use tauri::Emitter;
 
 // SFTP文件信息
@@ -501,7 +501,7 @@ fn recursive_delete_dir<'a>(session: &'a SftpSession, path: &'a str) -> std::pin
         // 读取目录内容
         let entries = match session.read_dir(path).await {
             Ok(entries) => entries,
-            Err(e) => {
+            Err(_) => {
                 // 如果读取失败，可能是空目录或权限问题，尝试直接删除
                 return match session.remove_dir(path).await {
                     Ok(_) => Ok(()),

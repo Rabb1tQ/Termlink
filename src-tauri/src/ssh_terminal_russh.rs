@@ -5,19 +5,20 @@ use tauri::Emitter;
 use tokio::runtime::Runtime;
 use russh::*;
 use russh_keys::*;
-use crate::ssh_command;
 
 // SSH终端消息类型
 enum SshMsg {
     Write(String),
     Resize { cols: u16, rows: u16 },
     Close,
+    #[allow(dead_code)]
     ExecuteCommand { command: String, response_sender: tokio::sync::oneshot::Sender<Result<String, String>> },
 }
 
 // SSH终端连接
 struct SshTerminal {
     sender: crossbeam_channel::Sender<SshMsg>,
+    #[allow(dead_code)]
     runtime: Option<Arc<Runtime>>,
 }
 
@@ -314,6 +315,7 @@ async fn execute_monitoring_command(session: &client::Handle<Client>, command: &
 }
 
 // 通过SSH终端执行命令（供系统监控使用）
+#[allow(dead_code)]
 pub async fn execute_command_via_terminal(terminal_id: &str, command: String) -> Result<String, String> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     

@@ -5,7 +5,6 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use async_trait::async_trait;
 use tauri::command;
-use crate::ssh_terminal_russh;
 
 // SSH连接池，复用现有连接
 lazy_static::lazy_static! {
@@ -13,7 +12,7 @@ lazy_static::lazy_static! {
         Arc::new(Mutex::new(HashMap::new()));
 }
 
-struct Client;
+pub(crate) struct Client;
 
 #[async_trait]
 impl client::Handler for Client {

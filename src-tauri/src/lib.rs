@@ -6,6 +6,7 @@ mod ssh_terminal_russh;
 mod system_monitor;
 mod download_manager;
 mod ssh_command;
+mod rdp;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -78,7 +79,13 @@ pub fn run() {
       // SSH command execution
       ssh_command::execute_ssh_command,
       ssh_command::connect_ssh_for_monitoring,
-      ssh_command::disconnect_ssh_monitoring
+      ssh_command::disconnect_ssh_monitoring,
+      
+      // RDP commands
+      rdp::save_rdp_profile,
+      rdp::list_rdp_profiles,
+      rdp::delete_rdp_profile,
+      rdp::launch_rdp
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

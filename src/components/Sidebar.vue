@@ -34,6 +34,17 @@
           <TagsOutlined />
         </a-button>
       </a-tooltip>
+
+      <a-tooltip placement="right" title="远程桌面">
+        <a-button
+          :type="activeTab === 'rdp' ? 'primary' : 'default'"
+          size="large"
+          @click="handleTabClick('rdp')"
+          class="sidebar-btn"
+        >
+          <DesktopOutlined />
+        </a-button>
+      </a-tooltip>
     </div>
 
     <!-- 内容区 - 可折叠，在右侧 -->
@@ -288,6 +299,134 @@
         <div v-else-if="activeTab === 'tags'" class="tab-content tags-content">
           <TagGroupManager ref="tagGroupManagerRef" @refresh-profiles="emit('refreshProfiles')" />
         </div>
+
+        <!-- 远程桌面 Tab 内容 -->
+        <div v-else-if="activeTab === 'rdp'" class="tab-content rdp-content">
+          <div class="section-title">远程桌面连接</div>
+
+          <!-- 搜索框 -->
+          <div class="search-section">
+            <a-input-search
+              v-model:value="rdpSearchText"
+              placeholder="搜索远程桌面..."
+              size="small"
+              allow-clear
+            />
+          </div>
+
+          <!-- 分组视图切换 -->
+          <div class="view-controls">
+            <a-segmented
+              v-model:value="rdpViewMode"
+              :options="[
+                { label: '列表', value: 'list' },
+                { label: '分组', value: 'group' }
+              ]"
+              size="small"
+            />
+          </div>
+
+          <!-- 列表视图 -->
+          <div v-if="rdpViewMode === 'list'" class="list-view">
+            <a-list
+              :data-source="filteredRdpProfiles"
+              :split="false"
+              size="small"
+              class="profile-list"
+            >
+              <template #renderItem="{ item }">
+                <a-list-item
+                  @dblclick="launchRdp(item)"
+                  @contextmenu.prevent="handleRdpContextMenu($event, item)"
+                  class="profile-item"
+                >
+                  <a-list-item-meta>
+                    <template #title>
+                      <div class="profile-title">
+                        <span>
+                          <DesktopOutlined style="margin-right: 4px; color: #1890ff;" />
+                          {{ item.name || item.host }}
+                        </span>
+                        <div class="profile-tags" v-if="item.tags && item.tags.length">
+                          <a-tag v-for="tag in item.tags" :key="tag" size="small">{{ tag }}</a-tag>
+                        </div>
+                      </div>
+                    </template>
+                    <template #description>
+                      <div class="profile-desc">
+                        <span>{{ item.host }}:{{ item.port }}</span>
+                        <a-tag v-if="item.group" size="small" color="blue">{{ item.group }}</a-tag>
+                      </div>
+                    </template>
+                  </a-list-item-meta>
+                  <template #actions>
+                    <a-button
+                      type="text"
+                      size="small"
+                      danger
+                      @click.stop="deleteRdpProfile(item)"
+                      class="delete-btn"
+                      title="删除连接"
+                    >
+                      <DeleteOutlined />
+                    </a-button>
+                  </template>
+                </a-list-item>
+              </template>
+            </a-list>
+          </div>
+
+          <!-- 分组视图 -->
+          <div v-else class="group-view">
+            <div v-for="(groupProfiles, groupName) in groupedRdpProfiles" :key="groupName" class="group-section">
+              <div class="group-header" @click="toggleRdpGroup(groupName)">
+                <span class="group-icon">
+                  {{ rdpExpandedGroups.has(groupName) ? '▼' : '▶' }}
+                </span>
+                <span class="group-name">{{ groupName || '未分组' }}</span>
+                <a-tag size="small">{{ groupProfiles.length }}</a-tag>
+              </div>
+              <div v-show="rdpExpandedGroups.has(groupName)" class="group-content">
+                <div
+                  v-for="item in groupProfiles"
+                  :key="item.id"
+                  @dblclick="launchRdp(item)"
+                  @contextmenu.prevent="handleRdpContextMenu($event, item)"
+                  class="group-item"
+                >
+                  <div class="item-content">
+                    <div class="item-title">
+                      <DesktopOutlined style="margin-right: 4px; color: #1890ff;" />
+                      {{ item.name || item.host }}
+                    </div>
+                    <div class="item-desc">{{ item.host }}:{{ item.port }}</div>
+                    <div class="item-tags" v-if="item.tags && item.tags.length">
+                      <a-tag v-for="tag in item.tags" :key="tag" size="small">{{ tag }}</a-tag>
+                    </div>
+                  </div>
+                  <a-button
+                    type="text"
+                    size="small"
+                    danger
+                    @click.stop="deleteRdpProfile(item)"
+                    class="delete-btn"
+                    title="删除连接"
+                  >
+                    <DeleteOutlined />
+                  </a-button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 新建按钮 -->
+          <div style="margin-top: 12px;">
+            <a-button type="dashed" block size="small" @click="emit('newRdp')">
+              <PlusOutlined />
+              新建远程桌面
+            </a-button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -315,7 +454,9 @@ import {
   FolderAddOutlined,
   FileAddOutlined,
   UploadOutlined,
-  TagsOutlined
+  TagsOutlined,
+  DesktopOutlined,
+  PlusOutlined
 } from '@ant-design/icons-vue'
 import { Modal, message, Dropdown, Menu } from 'ant-design-vue'
 import { invoke } from '@tauri-apps/api/core'
@@ -330,13 +471,17 @@ const props = defineProps({
     type: Array,
     default: () => []
   },
+  rdpProfiles: {
+    type: Array,
+    default: () => []
+  },
   activeTab: {
     type: Object,
     default: null
   }
 })
 
-const emit = defineEmits(['toggle', 'launchProfile', 'showFileManager', 'refreshProfiles', 'openFilePreview', 'startDownload', 'editProfile'])
+const emit = defineEmits(['toggle', 'launchProfile', 'showFileManager', 'refreshProfiles', 'openFilePreview', 'startDownload', 'editProfile', 'newRdp', 'launchRdpProfile', 'editRdpProfile', 'refreshRdpProfiles'])
 
 // Tab 切换状态
 const activeTab = ref('connections') // 'connections'、'files' 或 'tags'
@@ -347,7 +492,8 @@ const panelTitle = computed(() => {
   const titles = {
     connections: '连接管理',
     files: '文件管理器',
-    tags: '标签与分组'
+    tags: '标签与分组',
+    rdp: '远程桌面'
   }
   return titles[activeTab.value] || '连接管理'
 })
@@ -1501,6 +1647,193 @@ function copyProfileConfig(profile) {
     console.error('复制失败:', err)
     message.error('复制失败')
   })
+}
+
+// ==================== RDP 远程桌面相关逻辑 ====================
+
+// RDP 搜索和视图状态
+const rdpSearchText = ref('')
+const rdpViewMode = ref('list')
+const rdpExpandedGroups = ref(new Set(['未分组']))
+
+// 过滤后的 RDP 配置
+const filteredRdpProfiles = computed(() => {
+  if (!rdpSearchText.value.trim()) {
+    return props.rdpProfiles
+  }
+  const search = rdpSearchText.value.toLowerCase()
+  return props.rdpProfiles.filter(profile => {
+    const name = profile.name?.toLowerCase() || ''
+    const host = profile.host?.toLowerCase() || ''
+    const username = profile.username?.toLowerCase() || ''
+    const group = profile.group?.toLowerCase() || ''
+    const tags = profile.tags?.join(' ')?.toLowerCase() || ''
+    return name.includes(search) ||
+           host.includes(search) ||
+           username.includes(search) ||
+           group.includes(search) ||
+           tags.includes(search)
+  })
+})
+
+// 分组后的 RDP 配置
+const groupedRdpProfiles = computed(() => {
+  const filtered = filteredRdpProfiles.value
+  const groups = {}
+  filtered.forEach(profile => {
+    const groupName = profile.group || '未分组'
+    if (!groups[groupName]) {
+      groups[groupName] = []
+    }
+    groups[groupName].push(profile)
+  })
+  const sortedGroups = {}
+  if (groups['未分组']) {
+    sortedGroups['未分组'] = groups['未分组']
+  }
+  Object.keys(groups)
+    .filter(name => name !== '未分组')
+    .sort()
+    .forEach(name => {
+      sortedGroups[name] = groups[name]
+    })
+  return sortedGroups
+})
+
+// 切换 RDP 分组展开状态
+function toggleRdpGroup(groupName) {
+  if (rdpExpandedGroups.value.has(groupName)) {
+    rdpExpandedGroups.value.delete(groupName)
+  } else {
+    rdpExpandedGroups.value.add(groupName)
+  }
+}
+
+// 启动 RDP 连接
+async function launchRdp(profile) {
+  try {
+    await invoke('launch_rdp', { profile })
+    message.success(`正在启动远程桌面: ${profile.name || profile.host}`)
+  } catch (error) {
+    console.error('启动远程桌面失败:', error)
+    message.error('启动远程桌面失败: ' + error)
+  }
+}
+
+// 删除 RDP 配置
+async function deleteRdpProfile(profile) {
+  Modal.confirm({
+    title: '确认删除',
+    content: `确定要删除远程桌面连接 "${profile.name || profile.host}" 吗？此操作无法撤销。`,
+    okText: '删除',
+    okType: 'danger',
+    cancelText: '取消',
+    async onOk() {
+      try {
+        await invoke('delete_rdp_profile', { profileId: profile.id })
+        message.success('远程桌面连接已删除')
+        emit('refreshRdpProfiles')
+      } catch (error) {
+        console.error('删除远程桌面连接失败:', error)
+        message.error('删除远程桌面连接失败')
+      }
+    }
+  })
+}
+
+// RDP 右键菜单
+function handleRdpContextMenu(event, profile) {
+  event.preventDefault()
+
+  // 移除已存在的菜单
+  const existingMenu = document.querySelector('.rdp-context-menu')
+  if (existingMenu) {
+    existingMenu.remove()
+  }
+
+  const menu = document.createElement('div')
+  menu.className = 'rdp-context-menu'
+  menu.style.cssText = `
+    position: fixed;
+    left: ${event.clientX}px;
+    top: ${event.clientY}px;
+    background: var(--panel-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    z-index: 10000;
+    min-width: 150px;
+    padding: 4px 0;
+  `
+
+  const menuItems = [
+    {
+      label: '连接',
+      action: () => {
+        launchRdp(profile)
+        menu.remove()
+      }
+    },
+    {
+      label: '编辑',
+      action: () => {
+        emit('editRdpProfile', profile)
+        menu.remove()
+      }
+    },
+    { divider: true },
+    {
+      label: '删除',
+      action: () => {
+        deleteRdpProfile(profile)
+        menu.remove()
+      },
+      danger: true
+    }
+  ]
+
+  menuItems.forEach(item => {
+    if (item.divider) {
+      const divider = document.createElement('div')
+      divider.style.cssText = `
+        height: 1px;
+        background: var(--border-color);
+        margin: 4px 0;
+      `
+      menu.appendChild(divider)
+    } else {
+      const menuItem = document.createElement('div')
+      menuItem.style.cssText = `
+        padding: 8px 16px;
+        cursor: pointer;
+        color: ${item.danger ? 'var(--error-color)' : 'var(--text-color)'};
+        font-size: 14px;
+        transition: background-color 0.2s;
+      `
+      menuItem.textContent = item.label
+      menuItem.addEventListener('mouseenter', () => {
+        menuItem.style.backgroundColor = 'var(--hover-bg)'
+      })
+      menuItem.addEventListener('mouseleave', () => {
+        menuItem.style.backgroundColor = 'transparent'
+      })
+      menuItem.addEventListener('click', item.action)
+      menu.appendChild(menuItem)
+    }
+  })
+
+  document.body.appendChild(menu)
+
+  const closeMenu = (e) => {
+    if (!menu.contains(e.target)) {
+      menu.remove()
+      document.removeEventListener('click', closeMenu)
+    }
+  }
+
+  setTimeout(() => {
+    document.addEventListener('click', closeMenu)
+  }, 0)
 }
 </script>
 

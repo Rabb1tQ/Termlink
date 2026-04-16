@@ -15,6 +15,10 @@
           <KeyOutlined />
           新建 SSH 会话
         </a-menu-item>
+        <a-menu-item key="newRdp" @click="$emit('newRdp')">
+          <DesktopOutlined />
+          新建远程桌面
+        </a-menu-item>
       </a-sub-menu>
       
       <a-sub-menu key="view" title="视图">
@@ -45,18 +49,23 @@
           <KeyOutlined />
           SSH
         </a-button>
+        <a-button size="small" type="primary" @click="$emit('newRdp')">
+          <DesktopOutlined />
+          RDP
+        </a-button>
       </a-space>
     </div>
   </div>
 </template>
 
 <script setup>
-import { 
-  PlusOutlined, 
-  KeyOutlined, 
-  SettingOutlined, 
+import {
+  PlusOutlined,
+  KeyOutlined,
+  SettingOutlined,
   MonitorOutlined,
-  DashboardOutlined
+  DashboardOutlined,
+  DesktopOutlined
 } from '@ant-design/icons-vue'
 
 defineProps({
@@ -66,7 +75,7 @@ defineProps({
   }
 })
 
-defineEmits(['newLocal', 'newSsh', 'toggleTheme', 'showSettings'])
+defineEmits(['newLocal', 'newSsh', 'newRdp', 'toggleTheme', 'showSettings'])
 </script>
 
 <style scoped>

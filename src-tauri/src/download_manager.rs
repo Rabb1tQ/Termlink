@@ -28,7 +28,7 @@ pub async fn select_download_location(file_name: String) -> Result<Option<String
 
 // 获取SFTP文件信息（用于下载进度计算）
 #[command]
-pub async fn get_sftp_file_info(connection_id: String, path: String) -> Result<FileInfo, String> {
+pub async fn get_sftp_file_info(_connection_id: String, path: String) -> Result<FileInfo, String> {
     // 这里应该通过SFTP获取文件信息
     // 为了演示，返回模拟数据
     let file_name = Path::new(&path)
@@ -47,9 +47,9 @@ pub async fn get_sftp_file_info(connection_id: String, path: String) -> Result<F
 // 带进度的下载功能（这是一个占位符，实际实现会更复杂）
 #[command]
 pub async fn download_sftp_file_with_progress(
-    connection_id: String,
-    remote_path: String,
-    local_path: String,
+    _connection_id: String,
+    _remote_path: String,
+    _local_path: String,
 ) -> Result<(), String> {
     // 这里应该实现实际的下载逻辑
     // 包括分块下载和进度回调

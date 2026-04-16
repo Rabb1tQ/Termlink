@@ -1,9 +1,10 @@
 <template>
   <div class="app-container">
     <!-- 顶部菜单 -->
-    <TopMenu 
-      @new-local="newLocal" 
-      @new-ssh="newSsh" 
+    <TopMenu
+      @new-local="newLocal"
+      @new-ssh="newSsh"
+      @new-rdp="newRdp"
       @toggle-theme="toggleTheme"
       @show-settings="showSettings = true"
       @show-file-manager="showFileManager"
@@ -18,12 +19,17 @@
         :collapsed="leftPanelCollapsed"
         @toggle="leftPanelCollapsed = !leftPanelCollapsed"
         :profiles="profiles"
+        :rdp-profiles="rdpProfiles"
         @launch-profile="launchSavedProfile"
         :active-tab="getActiveTab()"
         @open-file-preview="openFilePreview"
         @refresh-profiles="refreshProfiles"
         @start-download="handleStartDownload"
         @edit-profile="editProfile"
+        @new-rdp="newRdp"
+        @launch-rdp-profile="launchRdpProfile"
+        @edit-rdp-profile="editRdpProfile"
+        @refresh-rdp-profiles="refreshRdpProfiles"
       />
       
       <!-- 右侧内容区 -->
@@ -108,6 +114,14 @@
       @update-config="updateTerminalConfig"
     />
     
+    <!-- RDP远程桌面模态框 -->
+    <RdpModal
+      v-model:visible="showRdpModal"
+      :edit-mode="rdpEditMode"
+      :edit-profile="editingRdpProfile"
+      @submit="submitRdp"
+    />
+    
   </div>
 </template>
 
@@ -127,9 +141,11 @@ import SettingsModal from './components/SettingsModal.vue'
 import RightPanel from './components/RightPanel.vue'
 import StatusBar from './components/StatusBar.vue'
 import FileEditor from './components/FileEditor.vue'
+import RdpModal from './components/RdpModal.vue'
 
 // 导入服务
 import SshService from './services/SshService'
+import RdpService from './services/RdpService'
 import ThemeService from './services/ThemeService'
 
 // 响应式数据
@@ -138,11 +154,14 @@ const activeId = ref('')
 const leftPanelCollapsed = ref(false)
 const showSshModal = ref(false)
 const showSettings = ref(false)
+const showRdpModal = ref(false)
 const rightPanelRef = ref(null)
 const rightPanelCollapsed = ref(true)
 const sidebarRef = ref(null)
 const sshEditMode = ref(false)
 const editingProfile = ref(null)
+const rdpEditMode = ref(false)
+const editingRdpProfile = ref(null)
 
 // 主题和设置
 const theme = ref(ThemeService.getTheme())
@@ -150,6 +169,7 @@ const terminalConfig = ref(ThemeService.getTerminalConfig())
 
 // 已保存的连接配置
 const profiles = ref([])
+const rdpProfiles = ref([])
 
 // 切换主题
 function toggleTheme(next) { 
@@ -164,6 +184,11 @@ function updateTerminalConfig(config) {
 // 刷新连接配置
 async function refreshProfiles() {
   profiles.value = await SshService.getProfiles();
+}
+
+// 刷新 RDP 连接配置
+async function refreshRdpProfiles() {
+  rdpProfiles.value = await RdpService.getProfiles();
 }
 
 // 获取活动连接信息
@@ -269,6 +294,75 @@ function editProfile(profile) {
   showSshModal.value = true
 }
 
+// 新建 RDP 远程桌面
+function newRdp() {
+  rdpEditMode.value = false
+  editingRdpProfile.value = null
+  showRdpModal.value = true
+}
+
+// 编辑 RDP 配置
+function editRdpProfile(profile) {
+  rdpEditMode.value = true
+  editingRdpProfile.value = profile
+  showRdpModal.value = true
+}
+
+// 提交 RDP 配置
+async function submitRdp(rdpData) {
+  try {
+    if (rdpData.isEdit) {
+      // 编辑模式
+      await RdpService.updateProfile(rdpData);
+      await refreshRdpProfiles();
+      showRdpModal.value = false;
+    } else {
+      // 新建模式：保存配置并启动
+      const profile = await RdpService.createProfile(rdpData);
+      await refreshRdpProfiles();
+      showRdpModal.value = false;
+      
+      // 保存后自动启动连接
+      try {
+        await RdpService.launchConnection(profile);
+        message.success(`正在启动远程桌面: ${profile.name || profile.host}`);
+      } catch (error) {
+        message.error('启动远程桌面失败: ' + error.toString());
+      }
+    }
+  } catch (error) {
+    console.error('RDP操作失败:', error);
+    message.error({
+      content: error.toString(),
+      duration: 8,
+      closable: true,
+      style: {
+        marginTop: '50px',
+        maxWidth: '400px'
+      }
+    });
+  }
+}
+
+// 启动已保存的 RDP 连接
+async function launchRdpProfile(profile) {
+  try {
+    await RdpService.launchConnection(profile);
+    message.success(`正在启动远程桌面: ${profile.name || profile.host}`);
+  } catch (error) {
+    console.error('启动远程桌面失败:', error);
+    message.error({
+      content: error.toString(),
+      duration: 8,
+      closable: true,
+      style: {
+        marginTop: '50px',
+        maxWidth: '400px'
+      }
+    });
+  }
+}
+
 // 通知侧边栏显示文件管理器
 function showFileManager() {
   // 展开左侧面板（如果折叠）
@@ -346,6 +440,8 @@ async function reconnectSsh(tab) {
 onMounted(async () => {
   // 加载已保存的SSH配置
   await refreshProfiles()
+  // 加载已保存的RDP配置
+  await refreshRdpProfiles()
   
   // 监听SFTP连接事件
   window.addEventListener('sftp-connected', (event) => {
