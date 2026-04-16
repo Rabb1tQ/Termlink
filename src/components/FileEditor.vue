@@ -87,20 +87,102 @@ const loading = ref(false)
 const saving = ref(false)
 const downloading = ref(false)
 
-// 根据文件扩展名获取语言
+// 根据文件名获取语言（支持无后缀名文件）
 function getLanguageFromFilename(filename) {
-  const ext = filename.split('.').pop()?.toLowerCase()
+  const lower = filename.toLowerCase()
+  
+  // 无后缀名文件名到语言的映射（如 Dockerfile, Makefile 等）
+  const filenameMap = {
+    'dockerfile': 'dockerfile',
+    'makefile': 'makefile',
+    'gnumakefile': 'makefile',
+    'cmakelists.txt': 'cmake',
+    'jenkinsfile': 'plaintext',
+    'vagrantfile': 'ruby',
+    'gemfile': 'ruby',
+    'rakefile': 'ruby',
+    'procfile': 'plaintext',
+    'brewfile': 'ruby',
+    'podfile': 'ruby',
+    'fastfile': 'ruby',
+    'readme': 'markdown',
+    'license': 'plaintext',
+    'copying': 'plaintext',
+    'authors': 'plaintext',
+    'contributors': 'plaintext',
+    'changelog': 'markdown',
+    'news': 'markdown',
+    'todo': 'plaintext',
+    'version': 'plaintext',
+    'install': 'plaintext',
+    'manifest': 'plaintext',
+    'cargo.lock': 'toml',
+    'yarn.lock': 'json',
+    'go.sum': 'plaintext',
+  }
+  
+  // 点号开头的配置文件映射
+  const dotFileMap = {
+    '.gitignore': 'plaintext',
+    '.gitattributes': 'plaintext',
+    '.gitmodules': 'plaintext',
+    '.env': 'plaintext',
+    '.env.local': 'plaintext',
+    '.env.development': 'plaintext',
+    '.env.production': 'plaintext',
+    '.env.test': 'plaintext',
+    '.bashrc': 'shell',
+    '.bash_profile': 'shell',
+    '.bash_logout': 'shell',
+    '.zshrc': 'shell',
+    '.zprofile': 'shell',
+    '.zshenv': 'shell',
+    '.profile': 'shell',
+    '.vimrc': 'plaintext',
+    '.npmrc': 'plaintext',
+    '.nvmrc': 'plaintext',
+    '.node-version': 'plaintext',
+    '.python-version': 'plaintext',
+    '.ruby-version': 'plaintext',
+    '.editorconfig': 'ini',
+    '.eslintrc': 'json',
+    '.prettierrc': 'json',
+    '.babelrc': 'json',
+    '.dockerignore': 'plaintext',
+    '.npmignore': 'plaintext',
+    '.hgignore': 'plaintext',
+    '.clang-format': 'yaml',
+    '.tool-versions': 'plaintext',
+  }
+  
+  // 先检查完整文件名匹配（无后缀名文件）
+  if (filenameMap[lower]) {
+    return filenameMap[lower]
+  }
+  
+  // 检查点号开头的文件
+  if (lower.startsWith('.') && dotFileMap[lower]) {
+    return dotFileMap[lower]
+  }
+  
+  // 扩展名到语言的映射
+  const ext = filename.includes('.') ? filename.split('.').pop()?.toLowerCase() : ''
   const languageMap = {
     'js': 'javascript',
     'jsx': 'javascript',
+    'mjs': 'javascript',
+    'cjs': 'javascript',
     'ts': 'typescript',
     'tsx': 'typescript',
+    'mts': 'typescript',
+    'cts': 'typescript',
     'json': 'json',
     'html': 'html',
     'htm': 'html',
     'css': 'css',
     'scss': 'scss',
     'less': 'less',
+    'sass': 'scss',
     'md': 'markdown',
     'py': 'python',
     'java': 'java',
@@ -116,6 +198,7 @@ function getLanguageFromFilename(filename) {
     'sh': 'shell',
     'bash': 'shell',
     'bat': 'bat',
+    'cmd': 'bat',
     'ps1': 'powershell',
     'sql': 'sql',
     'xml': 'xml',
@@ -124,9 +207,29 @@ function getLanguageFromFilename(filename) {
     'toml': 'toml',
     'ini': 'ini',
     'conf': 'plaintext',
+    'cfg': 'ini',
     'log': 'plaintext',
     'txt': 'plaintext',
-    'vue': 'html'
+    'vue': 'html',
+    'proto': 'plaintext',
+    'graphql': 'plaintext',
+    'lua': 'lua',
+    'swift': 'swift',
+    'kt': 'kotlin',
+    'kts': 'kotlin',
+    'scala': 'scala',
+    'dart': 'dart',
+    'groovy': 'groovy',
+    'gradle': 'groovy',
+    'cmake': 'cmake',
+    'make': 'makefile',
+    'dockerfile': 'dockerfile',
+    'tf': 'hcl',
+    'tfvars': 'hcl',
+    'hcl': 'hcl',
+    'lock': 'json',
+    'map': 'json',
+    'properties': 'ini',
   }
   return languageMap[ext] || 'plaintext'
 }

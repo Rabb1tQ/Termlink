@@ -602,28 +602,146 @@ function handleSftpFileClick(file) {
 function handleSftpFileDoubleClick(file) {
   const state = currentSftpState.value
   if (!state) return
-  
+
   if (file.is_dir) {
     // 文件夹双击进入
-    const newPath = state.currentPath === '/' 
-      ? `/${file.name}` 
+    const newPath = state.currentPath === '/'
+      ? `/${file.name}`
       : `${state.currentPath}/${file.name}`
     loadSftpFiles(newPath)
   } else {
-    // 文件双击仅在文本文件时打开预览，其他文件不做任何操作
-    if (isTextFile(file.name)) {
-      openFilePreview(file)
+    // 文件双击处理
+    const LARGE_FILE_SIZE = 1024 * 1024 // 1MB - 大文件阈值
+    const HUGE_FILE_SIZE = 10 * 1024 * 1024 // 10MB - 超大文件阈值
+    const isLargeFile = file.size > LARGE_FILE_SIZE
+    const isHugeFile = file.size > HUGE_FILE_SIZE
+
+    // 判断是否为文本文件
+    const textFile = isTextFile(file.name)
+
+    if (textFile) {
+      // 文本文件
+      if (isHugeFile) {
+        // 超大文件（>10MB）强警告
+        Modal.confirm({
+          title: '⚠️ 文件非常大',
+          content: `文件大小为 ${formatFileSize(file.size)}，打开可能导致编辑器卡顿或内存占用过高。建议下载后使用本地编辑器打开。是否仍要继续？`,
+          okText: '仍然打开',
+          okType: 'danger',
+          cancelText: '取消',
+          onOk: () => openFilePreview(file)
+        })
+      } else if (isLargeFile) {
+        // 大文件（1MB~10MB）普通提示
+        Modal.confirm({
+          title: '文件较大',
+          content: `文件大小为 ${formatFileSize(file.size)}，打开可能会较慢。是否继续打开？`,
+          okText: '继续打开',
+          cancelText: '取消',
+          onOk: () => openFilePreview(file)
+        })
+      } else {
+        openFilePreview(file)
+      }
+    } else {
+      // 非文本文件，提供打开和下载选项
+      showFileDownloadDialog(file)
     }
-    // 移除了对非文本文件的showFileActions调用
   }
 }
 
+// 显示非文本文件操作对话框（提供打开和下载选项）
+function showFileDownloadDialog(file) {
+  const HUGE_FILE_SIZE = 10 * 1024 * 1024 // 10MB
+  
+  if (file.size > HUGE_FILE_SIZE) {
+    // 超大非文本文件，只建议下载
+    Modal.confirm({
+      title: `文件: ${file.name}`,
+      content: `这是一个非文本文件（${formatFileSize(file.size)}），文件较大，建议下载后查看。`,
+      okText: '下载',
+      cancelText: '取消',
+      onOk: () => downloadFile(file)
+    })
+  } else {
+    // 普通非文本文件，提供打开和下载两个选项
+    Modal.confirm({
+      title: `文件: ${file.name}`,
+      content: `这是一个非文本文件（${formatFileSize(file.size)}），可以尝试以文本方式打开，但内容可能显示乱码。`,
+      okText: '尝试打开',
+      cancelText: '下载',
+      onOk: () => openFilePreview(file),
+      onCancel: () => downloadFile(file)
+    })
+  }
+}
+
+// 已知的无后缀名文本文件列表（全小写）
+const KNOWN_TEXT_FILENAMES = new Set([
+  'dockerfile', 'makefile', 'cmakelists.txt', 'vagrantfile', 'gemfile',
+  'rakefile', 'procfile', 'brewfile', 'podfile', 'fastfile',
+  'jenkinsfile', 'docker-compose', 'readme', 'license', 'copying',
+  'authors', 'contributors', 'changelog', 'news', 'todo', 'version',
+  'install', 'manifest', 'cargo.lock', 'package.lock', 'yarn.lock',
+  'go.sum', 'pipfile.lock', 'poetry.lock'
+])
+
+// 已知的点号开头的文本文件（如 .gitignore, .bashrc 等）
+const KNOWN_DOT_FILES = new Set([
+  '.gitignore', '.gitattributes', '.gitmodules',
+  '.env', '.env.local', '.env.development', '.env.production', '.env.test',
+  '.bashrc', '.bash_profile', '.bash_logout', '.bash_history',
+  '.zshrc', '.zprofile', '.zshenv', '.zlogin', '.zlogout',
+  '.profile', '.bash_aliases',
+  '.vimrc', '.gvimrc',
+  '.npmrc', '.nvmrc', '.node-version', '.python-version', '.ruby-version',
+  '.editorconfig', '.eslintrc', '.prettierrc', '.stylelintrc', '.babelrc',
+  '.tsconfig', '.jsconfig',
+  '.dockerignore', '.eslintignore', '.prettierignore', '.stylelintignore',
+  '.npmignore', '.hgignore', '.svnignore', '.cvsignore',
+  '.mailmap', '.clang-format', '.clang-tidy',
+  '.terraform-version', '.tool-versions',
+  '.luacheckrc', '.styluarc', '.stylua.toml'
+])
+
 // 判断是否为文本文件
 function isTextFile(filename) {
+  const lower = filename.toLowerCase()
+  
+  // 检查已知的无后缀名文本文件（如 Dockerfile, Makefile）
+  if (KNOWN_TEXT_FILENAMES.has(lower)) {
+    return true
+  }
+  
+  // 检查已知的点号开头配置文件（如 .gitignore, .bashrc）
+  if (filename.startsWith('.') && KNOWN_DOT_FILES.has(lower)) {
+    return true
+  }
+  
+  // 没有扩展名且不是已知文件，尝试作为文本文件处理
+  if (!filename.includes('.')) {
+    return true
+  }
+
   const textExts = [
-    'txt', 'md', 'json', 'xml', 'html', 'css', 'js', 'ts', 'vue', 
+    'txt', 'md', 'json', 'xml', 'html', 'css', 'js', 'ts', 'vue',
     'py', 'java', 'cpp', 'c', 'h', 'rs', 'go', 'php', 'rb', 'sh',
-    'yml', 'yaml', 'ini', 'conf', 'log', 'sql', 'csv'
+    'yml', 'yaml', 'ini', 'conf', 'log', 'sql', 'csv',
+    'toml', 'cfg', 'properties', 'htaccess', 'nginx',
+    'jsx', 'tsx', 'mjs', 'cjs', 'mts', 'cts',
+    'scss', 'less', 'sass', 'styl',
+    'dockerfile', 'makefile', 'gitignore', 'env',
+    'proto', 'graphql', 'gql',
+    'lua', 'vim', 'fish',
+    'pl', 'pm', 'r', 'R',
+    'swift', 'kt', 'kts', 'scala',
+    'dart', 'groovy', 'gradle',
+    'cmake', 'make', 'mk',
+    'ps1', 'psm1', 'psd1', 'bat', 'cmd',
+    'awk', 'sed',
+    'tf', 'tfvars', 'hcl',
+    'dockerignore', 'editorconfig', 'eslintrc', 'prettierrc',
+    'lock', 'map'
   ]
   const ext = filename.split('.').pop()?.toLowerCase()
   return textExts.includes(ext)
@@ -861,20 +979,26 @@ function showSftpContextMenu(event, file) {
 function getSftpFileIcon(file) {
   if (file.is_dir) return FolderOutlined
   
-  const ext = file.name.split('.').pop()?.toLowerCase()
-  if (!ext) return FileOutlined
-  
-  const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'svg', 'webp']
-  const videoExts = ['mp4', 'avi', 'mkv', 'mov', 'wmv', 'flv']
-  const audioExts = ['mp3', 'wav', 'flac', 'aac', 'ogg']
-  const textExts = ['txt', 'md', 'json', 'xml', 'html', 'css', 'js', 'ts', 'vue']
-  const archiveExts = ['zip', 'rar', '7z', 'tar', 'gz']
-  
-  if (imageExts.includes(ext)) return FileImageOutlined
-  if (videoExts.includes(ext)) return VideoCameraOutlined
-  if (audioExts.includes(ext)) return SoundOutlined
-  if (textExts.includes(ext)) return FileTextOutlined
-  if (archiveExts.includes(ext)) return FileZipOutlined
+  // 先检查是否为已知文本文件（无后缀名或点号开头的文件）
+  if (isTextFile(file.name)) {
+    // 有扩展名的文件走扩展名匹配逻辑
+    const ext = file.name.includes('.') ? file.name.split('.').pop()?.toLowerCase() : null
+    
+    if (ext) {
+      const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'svg', 'webp']
+      const videoExts = ['mp4', 'avi', 'mkv', 'mov', 'wmv', 'flv']
+      const audioExts = ['mp3', 'wav', 'flac', 'aac', 'ogg']
+      const archiveExts = ['zip', 'rar', '7z', 'tar', 'gz']
+      
+      if (imageExts.includes(ext)) return FileImageOutlined
+      if (videoExts.includes(ext)) return VideoCameraOutlined
+      if (audioExts.includes(ext)) return SoundOutlined
+      if (archiveExts.includes(ext)) return FileZipOutlined
+    }
+    
+    // 无后缀名的文本文件（如 Dockerfile, Makefile）或普通文本文件
+    return FileTextOutlined
+  }
   
   return FileOutlined
 }
