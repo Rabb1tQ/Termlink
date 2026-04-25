@@ -27,6 +27,30 @@ class RdpService {
   }
 
   /**
+   * 保存 RDP 密码到 keyring
+   * @param {string} id 配置ID
+   * @param {string} password 密码
+   * @returns {Promise<void>}
+   */
+  async savePassword(id, password) {
+    return await invoke('save_rdp_password', { id, password });
+  }
+
+  /**
+   * 获取 RDP 密码
+   * @param {string} id 配置ID
+   * @returns {Promise<string|null>}
+   */
+  async getPassword(id) {
+    try {
+      return await invoke('get_rdp_password', { id });
+    } catch (e) {
+      console.error('获取RDP密码失败:', e);
+      return null;
+    }
+  }
+
+  /**
    * 删除 RDP 配置
    * @param {string} profileId 配置ID
    * @returns {Promise<void>}
@@ -63,9 +87,16 @@ class RdpService {
       width: rdpData.width ? Number(rdpData.width) : null,
       height: rdpData.height ? Number(rdpData.height) : null,
       admin_mode: rdpData.adminMode || false,
+      save_password: rdpData.savePassword || false,
     };
 
     await this.saveProfile(profile);
+
+    // 保存密码到 keyring
+    if (profile.save_password && rdpData.password) {
+      await this.savePassword(profile.id, rdpData.password);
+    }
+
     return profile;
   }
 
@@ -88,9 +119,16 @@ class RdpService {
       width: rdpData.width ? Number(rdpData.width) : null,
       height: rdpData.height ? Number(rdpData.height) : null,
       admin_mode: rdpData.adminMode || false,
+      save_password: rdpData.savePassword || false,
     };
 
     await this.saveProfile(profile);
+
+    // 更新密码到 keyring
+    if (profile.save_password && rdpData.password) {
+      await this.savePassword(profile.id, rdpData.password);
+    }
+
     return profile;
   }
 }

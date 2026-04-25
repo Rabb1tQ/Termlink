@@ -105,6 +105,19 @@
           使用管理模式连接到服务器的控制台会话
         </div>
       </a-form-item>
+      
+      <a-form-item label="密码" name="password">
+        <a-input-password v-model:value="form.password" placeholder="远程桌面登录密码（可选）" />
+      </a-form-item>
+      
+      <a-form-item>
+        <a-checkbox v-model:checked="form.savePassword">
+          保存密码并自动登录
+        </a-checkbox>
+        <div v-if="form.savePassword" style="margin-top: 4px; color: var(--muted-color); font-size: 12px;">
+          密码将安全加密存储，连接时自动填充凭据，无需手动输入
+        </div>
+      </a-form-item>
     </a-form>
   </a-modal>
 </template>
@@ -139,10 +152,12 @@ const form = ref({
   port: 3389,
   username: '',
   domain: '',
+  password: '',
   displayMode: 'fullscreen',
   width: 1920,
   height: 1080,
   adminMode: false,
+  savePassword: false,
   group: '',
   tags: []
 })
@@ -170,7 +185,9 @@ function resetForm() {
       height: p.height || 1080,
       adminMode: p.admin_mode || false,
       group: p.group || '',
-      tags: p.tags || []
+      tags: p.tags || [],
+      password: '',
+      savePassword: p.save_password || false
     }
   } else {
     form.value = {
@@ -184,7 +201,9 @@ function resetForm() {
       height: 1080,
       adminMode: false,
       group: '',
-      tags: []
+      tags: [],
+      password: '',
+      savePassword: false
     }
   }
   formRef.value?.resetFields()

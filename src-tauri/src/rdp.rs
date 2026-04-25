@@ -28,6 +28,8 @@ pub struct RdpProfileMeta {
   pub height: Option<u32>,
   #[serde(default)]
   pub admin_mode: bool,
+  #[serde(default)]
+  pub save_password: bool,
 }
 
 fn default_true() -> bool {
@@ -51,6 +53,25 @@ pub fn save_rdp_profile(app: AppHandle, profile: RdpProfileMeta) -> Result<(), S
   let data = serde_json::to_string_pretty(&profile).map_err(|e| e.to_string())?;
   fs::write(path, data).map_err(|e| e.to_string())?;
   Ok(())
+}
+
+/// 保存 RDP 密码到 keyring
+#[tauri::command]
+pub fn save_rdp_password(id: String, password: String) -> Result<(), String> {
+  let entry = keyring::Entry::new("Termlink-RDP", &id).map_err(|e| e.to_string())?;
+  entry.set_password(&password).map_err(|e| e.to_string())?;
+  Ok(())
+}
+
+/// 获取 RDP 密码
+#[tauri::command]
+pub fn get_rdp_password(id: String) -> Result<Option<String>, String> {
+  let entry = keyring::Entry::new("Termlink-RDP", &id).map_err(|e| e.to_string())?;
+  match entry.get_password() {
+    Ok(pw) => Ok(Some(pw)),
+    Err(keyring::Error::NoEntry) => Ok(None),
+    Err(e) => Err(e.to_string()),
+  }
 }
 
 /// 列出所有 RDP 配置
@@ -80,6 +101,9 @@ pub fn delete_rdp_profile(app: AppHandle, profile_id: String) -> Result<(), Stri
   if path.exists() {
     fs::remove_file(path).map_err(|e| e.to_string())?;
   }
+  // 同时删除保存的密码
+  let entry = keyring::Entry::new("Termlink-RDP", &profile_id).map_err(|e| e.to_string())?;
+  let _ = entry.delete_password(); // 忽略删除密码的错误
   Ok(())
 }
 
@@ -171,6 +195,50 @@ fn generate_rdp_file_content(profile: &RdpProfileMeta) -> String {
 /// 启动 RDP 连接 - 生成临时 .rdp 文件并调用 mstsc
 #[tauri::command]
 pub fn launch_rdp(_app: AppHandle, profile: RdpProfileMeta) -> Result<(), String> {
+  // 如果配置了保存密码且有用户名，尝试通过 cmdkey 注入凭据
+  if profile.save_password {
+    if let Some(ref username) = profile.username {
+      // 从 keyring 获取密码
+      let password = get_rdp_password(profile.id.clone())?;
+      if let Some(pw) = password {
+        // 使用 cmdkey 预注入凭据到 Windows 凭据管理器
+        let target = format!("TERMSRV/{}", profile.host);
+        let user_arg = if let Some(ref domain) = profile.domain {
+          if !domain.is_empty() {
+            format!("{}\\{}", domain, username)
+          } else {
+            username.clone()
+          }
+        } else {
+          username.clone()
+        };
+
+        // 先删除旧的凭据（如果存在），再添加新的
+        let _ = std::process::Command::new("cmdkey")
+          .args(["/delete", &target])
+          .output();
+
+        std::process::Command::new("cmdkey")
+          .args([
+            "/generic:TERMSRV",
+            &format!("/add:{}", profile.host),
+          ])
+          .output()
+          .map_err(|e| format!("cmdkey执行失败: {}", e))?;
+
+        // 使用更可靠的方式：直接通过 cmd /c 执行 cmdkey
+        let cmdkey_cmd = format!(
+          "cmdkey /generic:{} /user:{} /pass:{}",
+          target, user_arg, pw
+        );
+        std::process::Command::new("cmd")
+          .args(["/c", &cmdkey_cmd])
+          .output()
+          .map_err(|e| format!("cmdkey注入凭据失败: {}", e))?;
+      }
+    }
+  }
+
   // 生成 .rdp 文件内容
   let content = generate_rdp_file_content(&profile);
 

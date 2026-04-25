@@ -85,7 +85,9 @@ pub fn run() {
       rdp::save_rdp_profile,
       rdp::list_rdp_profiles,
       rdp::delete_rdp_profile,
-      rdp::launch_rdp
+      rdp::launch_rdp,
+      rdp::save_rdp_password,
+      rdp::get_rdp_password
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
